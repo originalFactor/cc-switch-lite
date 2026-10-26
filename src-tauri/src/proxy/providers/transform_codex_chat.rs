@@ -509,7 +509,7 @@ fn map_reasoning_effort<'a>(
             _ => None,
         },
         // OpenCode Zen：合法档位逐模型（表数据 = 供应商 modelCatalog 各条目的
-        // reasoningLevels，镜像 models.dev——glm-5.2 仅 high|max、deepseek-v4-flash
+        // reasoningLevels，镜像 oh-my-pi 模型目录——glm-5.2 仅 high|max、deepseek-v4-flash
         // 为 low|high|max、kimi-k3 仅 max），opencode 客户端也严格按模型声明发值，
         // 故不能用统一并集映射。无表（模型未收录目录、或为 toggle/budget 型未声明
         // effort）→ None，完全不发 reasoning_effort；有表 → 钳到「不小于请求的
@@ -3302,7 +3302,7 @@ mod tests {
 
     #[test]
     fn responses_request_to_chat_clamps_zen_effort_to_model_declared_levels() {
-        // OpenCode Zen 平台形态 + 逐模型档位钳制（表数据镜像 models.dev：glm-5.2
+        // OpenCode Zen 平台形态 + 逐模型档位钳制（表数据镜像 oh-my-pi 模型目录：glm-5.2
         // 仅声明 high|max）。锁定：统一并集映射会把 Codex 默认的 medium 发给只声明
         // high|max 的 glm-5.2（恰好是预设默认模型），严格校验的网关会报错；
         // 低档一律上钳到最近合法档，超出最高档（含 Codex 扩展档 ultra）取最高合法档。

@@ -224,8 +224,11 @@ impl ProviderService {
         .map(|opt| opt.unwrap_or_default())
     }
 
-    /// 新增供应商之前的规范化和校验，`add` 和 `add_without_switching` 共用。
-    fn prepare_new_provider(app_type: &AppType, provider: &mut Provider) -> Result<(), AppError> {
+    /// 新增供应商之前的规范化和校验，`add`、`add_without_switching` 和深链接导入共用。
+    pub(crate) fn prepare_new_provider(
+        app_type: &AppType,
+        provider: &mut Provider,
+    ) -> Result<(), AppError> {
         // Normalize Claude model keys
         Self::normalize_provider_if_claude(app_type, provider);
         Self::validate_provider_settings(app_type, provider)?;
@@ -238,8 +241,8 @@ impl ProviderService {
 
     /// 只把供应商存进列表，不写客户端配置、不动当前指针。
     ///
-    /// `add` 在还没有当前供应商时会让新的这家直接生效；深链接导入时用户关掉了「导入后立即
-    /// 切换」，就不能这样，交给用户之后自己切换。
+    /// `add` 在还没有当前供应商时会让新的这家直接生效；需要「只保存、不生效」的调用方
+    /// （例如确认框里关掉了「导入后立即切换」）走这里，交给用户之后自己切换。
     pub fn add_without_switching(
         state: &AppState,
         app_type: AppType,
@@ -2224,7 +2227,7 @@ impl ProviderService {
         Ok(true)
     }
 
-    /// 拉取可用模型列表：`/v1/models` 出 id，models.dev 补名称与上下文窗口。
+    /// 拉取可用模型列表：`/v1/models` 出 id，oh-my-pi 模型目录补名称与上下文窗口。
     ///
     /// 传 `id` 时用已存的那家供应商的地址/Key 并写回它自己；不传时用传入的地址与 Key
     /// 现拉（新建场景：记录还没落库，没有 id 可用）。

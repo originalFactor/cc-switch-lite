@@ -163,7 +163,7 @@ const desktopRouteRowsFrom = (
 
 /**
  * 某一档在 Claude Desktop 菜单里的显示名：所选模型在可用模型列表里的 displayName
- * （models.dev 的名称）。没有对应模型或该行没有显示名时不写 labelOverride，由
+ * （模型目录的名称）。没有对应模型或该行没有显示名时不写 labelOverride，由
  * Desktop 自己回退成模型名。
  */
 const desktopMenuLabel = (
@@ -345,7 +345,7 @@ export function UniversalProviderFormModal({
 
   // 模型配置
   const [models, setModels] = useState<UniversalProviderModels>({});
-  /** 从 `/v1/models` 拉到的可用模型列表（models.dev 补全过）；所有应用共用。 */
+  /** 从 `/v1/models` 拉到的可用模型列表（oh-my-pi 模型目录补全过）；所有应用共用。 */
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   /** 上次拉取的结果，用于「恢复」：用户手改过之后还能还原。 */
   const [fetchedModels, setFetchedModels] = useState<AvailableModel[]>([]);
@@ -450,7 +450,7 @@ export function UniversalProviderFormModal({
   }, [editingProvider]);
 
   // Codex effort 下拉的选项：跟 Codex 卡所选模型那一行的档位（拉取时由
-  // models.dev 补全，模型列表编辑器里可改）；该行没声明时退回预置全集。
+  // 模型目录补全，模型列表编辑器里可改）；该行没声明时退回预置全集。
   const codexEffortOptions = useMemo(
     () =>
       effortOptionsFor(
@@ -688,7 +688,7 @@ model = "${model}"
 model_reasoning_effort = "${reasoningEffort}"
 disable_response_storage = true`;
     // 顶层字段写在表头之前：TOML 里表头之后的键属于那张表。
-    // 上下文窗口跟所选模型行的元数据（models.dev limit.context）；压缩阈值存的是
+    // 上下文窗口跟所选模型行的元数据（模型目录的 contextWindow）；压缩阈值存的是
     // 百分比，按同一个窗口换算成绝对 token 数（和后端 to_codex_provider 同规则）。
     const contextWindow = availableModels.find(
       (row) => row.id === model,
@@ -1186,7 +1186,7 @@ ${tables.join("\n\n")}
   }, [pendingProvider, onSaveAndSync, onClose]);
 
   /**
-   * 拉取可用模型：后端问供应商的 `/v1/models`，再用 models.dev 补名称和上下文窗口，
+   * 拉取可用模型：后端问供应商的 `/v1/models`，再用 oh-my-pi 模型目录补名称和上下文窗口，
    * 结果写回该供应商。新建时还没有 id，先不拉。
    */
   const handleFetchModels = useCallback(async () => {
@@ -2063,7 +2063,7 @@ ${tables.join("\n\n")}
               </div>
 
               {/* 模型目录不再手填：后端用统一供应商的可用模型列表自动生成
-                  （名称与上下文窗口来自拉取时的 models.dev 补全）。 */}
+                  （名称与上下文窗口来自拉取时的 oh-my-pi 模型目录补全）。 */}
               <p className="pt-3 text-xs text-fg-2">
                 {t("codexConfig.catalogAutoHint", {
                   defaultValue:

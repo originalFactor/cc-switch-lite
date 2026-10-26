@@ -16,12 +16,18 @@ use std::str::FromStr;
 
 /// Import a provider from a deep link request
 ///
-/// This function:
-/// 1. Validates the request
-/// 2. Merges config file if provided (v3.8+)
-/// 3. Converts it to a Provider structure
-/// 4. Delegates to ProviderService for actual import
-/// 5. Optionally sets as current provider if enabled=true
+/// 深链接描述的永远是「一个应用的模型配置」，但导入不再生成 per-app 行：先按链接
+/// 建出该应用的完整配置（所有字段白名单、校验都在 [`build_provider_from_request`]），
+/// 再转成统一供应商，同步到全部应用。链接里的应用只决定模型块落在哪一块、以及
+/// `enabled=true` 时先切哪一个应用。
+///
+/// 步骤：
+/// 1. 校验请求
+/// 2. 合并链接附带的配置文件（v3.8+）
+/// 3. 按应用建出配置（只用来取模型与连接字段）
+/// 4. 转成统一供应商并保存
+/// 5. 同步出五个应用的子卡
+/// 6. `enabled=true` 时把来源应用切到它的子卡
 pub fn import_provider_from_deeplink(
     state: &AppState,
     request: DeepLinkImportRequest,
@@ -97,7 +103,7 @@ pub fn import_provider_from_deeplink(
     let app_type = AppType::from_str(&app_str)
         .map_err(|_| AppError::InvalidInput(format!("Invalid app type: {app_str}")))?;
 
-    // Build provider configuration based on app type
+    // Step 2: 先按来源应用建出完整配置：链接字段的白名单、校验都只在这一处。
     let mut provider = build_provider_from_request(&app_type, &merged_request)?;
 
     // Generate a unique ID for the provider using timestamp + sanitized name
@@ -108,43 +114,45 @@ pub fn import_provider_from_deeplink(
         .collect::<String>()
         .to_lowercase();
     provider.id = format!("{sanitized_name}-{timestamp}");
+    // 和新增路径一样过一遍规范化和校验，统一供应商拿到的才是「能存的行」。
+    ProviderService::prepare_new_provider(&app_type, &mut provider)?;
 
-    let provider_id = provider.id.clone();
-
-    // `enabled` 是确认框里「导入后立即切换」开关的值（链接里的 `enabled` 只是它的初始值）。
-    // 开关关闭时只把这家存进列表：`add` 在还没有当前供应商时会让它直接生效，不能这样。
-    let activate = merged_request.enabled.unwrap_or(false);
-    if activate {
-        ProviderService::add(state, app_type.clone(), provider, true)?;
-    } else {
-        ProviderService::add_without_switching(state, app_type.clone(), provider)?;
-    }
-
-    // Add extra endpoints as custom endpoints (skip first one as it's the primary)
-    for ep in all_endpoints.iter().skip(1) {
-        let normalized = ep.trim().trim_end_matches('/').to_string();
-        if !normalized.is_empty() {
-            if let Err(e) = ProviderService::add_custom_endpoint(
-                state,
-                app_type.clone(),
-                &provider_id,
-                normalized.clone(),
-            ) {
-                log::warn!(
-                    "Failed to add custom endpoint '{}': {e}",
-                    crate::url_for_log(&normalized)
-                );
+    // Step 3: 转成统一供应商。链接里的其他地址作为这家供应商的自定义端点。
+    let mut universal = crate::services::provider::universal_migration::universal_from_provider(
+        &app_type, &provider,
+    )?;
+    if all_endpoints.len() > 1 {
+        let added_at = chrono::Utc::now().timestamp_millis();
+        let meta = universal.meta.get_or_insert_with(ProviderMeta::default);
+        for endpoint in all_endpoints.iter().skip(1) {
+            let normalized = endpoint.trim().trim_end_matches('/').to_string();
+            if normalized.is_empty() {
+                continue;
             }
+            meta.custom_endpoints.entry(normalized.clone()).or_insert(
+                crate::settings::CustomEndpoint {
+                    url: normalized,
+                    added_at,
+                    last_used: None,
+                },
+            );
         }
     }
 
-    // If enabled=true, set as current provider
-    if activate {
-        ProviderService::switch(state, app_type.clone(), &provider_id)?;
-        log::info!("Provider '{provider_id}' set as current for {app_type:?}");
+    // Step 4: 保存并同步出全部应用的子卡。同步失败时统一供应商已经落库，错误向上
+    // 冒泡让用户重试；重试是幂等的。
+    ProviderService::upsert_universal(state, universal.clone())?;
+    ProviderService::sync_universal_to_apps(state, &universal.id)?;
+
+    // Step 5: `enabled` 是确认框里「导入后立即切换」开关的值（链接里的 `enabled` 只是
+    // 它的初始值）。只切来源应用：其他应用没有用户显式要求切换，保持原样。
+    if merged_request.enabled.unwrap_or(false) {
+        let child_id = format!("universal-{}-{}", app_type.as_str(), universal.id);
+        ProviderService::switch(state, app_type.clone(), &child_id)?;
+        log::info!("Provider '{child_id}' set as current for {app_type:?}");
     }
 
-    Ok(provider_id)
+    Ok(universal.id)
 }
 
 /// 链接声明的接口格式（`apiFormat`）。站长只学这一套词，各应用换算成自己的字段。

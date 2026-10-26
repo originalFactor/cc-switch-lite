@@ -23,9 +23,9 @@ use serde_json::Value;
 use crate::app_config::AppType;
 use crate::error::AppError;
 use crate::provider::{
-    ClaudeDesktopModelConfig, ClaudeDesktopModelRoute, ClaudeModelConfig, CodexModelConfig,
-    GeminiModelConfig, GrokBuildModelConfig, Provider, ProviderMeta, UniversalProvider,
-    UniversalProviderApps, UniversalProviderModels,
+    AvailableModel, ClaudeDesktopModelConfig, ClaudeDesktopModelRoute, ClaudeModelConfig,
+    CodexModelConfig, GeminiModelConfig, GrokBuildModelConfig, Provider, ProviderMeta,
+    UniversalProvider, UniversalProviderApps, UniversalProviderModels,
 };
 use crate::store::AppState;
 
@@ -322,6 +322,19 @@ fn claude_switches(settings: &Value) -> Option<ClaudeModelConfig> {
     any.then_some(block)
 }
 
+/// Grok Build 的 `meta.apiFormat`（链接词表）换算成模型表的 `api_backend`。
+///
+/// 深链接按「一套格式词」声明上游协议，per-app 行把它记在 meta 上；统一供应商只有
+/// `apiBackend` 一个字段，不换算的话导入或迁移后协议会退回默认的 responses。
+fn grok_api_backend(api_format: &str) -> Option<&'static str> {
+    match api_format.trim() {
+        "openai_chat" | "chat_completions" => Some("chat_completions"),
+        "openai_responses" => Some("responses"),
+        "anthropic" | "anthropic_messages" => Some("anthropic_messages"),
+        _ => None,
+    }
+}
+
 /// 把行 meta 里「统一供应商也认识」的应用专属字段并进 per-app 模型块。
 fn merge_meta_into_models(
     app: &AppType,
@@ -363,6 +376,16 @@ fn merge_meta_into_models(
             codex.prompt_cache_routing = m.prompt_cache_routing.clone();
             codex.chat_reasoning = m.codex_chat_reasoning.clone();
         }
+        AppType::GrokBuild => {
+            // TOML 里已经写了 api_backend 的照旧；meta 里另有一套链接词表时以它为准
+            // （深链接导入的行走这条）。
+            if let Some(backend) = m.api_format.as_deref().and_then(grok_api_backend) {
+                let grok = models
+                    .grokbuild
+                    .get_or_insert_with(GrokBuildModelConfig::default);
+                grok.api_backend = Some(backend.to_string());
+            }
+        }
         _ => {}
     }
 }
@@ -381,6 +404,134 @@ fn merge_meta(target: &mut ProviderMeta, source: &ProviderMeta) {
     if target.custom_endpoints.is_empty() {
         target.custom_endpoints = source.custom_endpoints.clone();
     }
+}
+
+/// 链接只声明了几个模型名，但统一供应商的表单和子卡都从 `available_models` 取模型与
+/// 窗口元数据：不种进去的话导入后模型下拉是空的，Grok Build / Codex 的上下文窗口也会
+/// 退回默认值。这里把来源应用配置里出现的模型 id 收进列表；窗口能从 config.toml 读到的
+/// 一起带上（Claude 的 `[1M]` 声明存在模型块自己的字段里，投影时照写）。
+fn seed_available_models(
+    app: &AppType,
+    provider: &Provider,
+    models: &UniversalProviderModels,
+) -> Vec<AvailableModel> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut push = |value: Option<&String>| {
+        let Some(id) = value.map(|v| v.trim()).filter(|v| !v.is_empty()) else {
+            return;
+        };
+        if !ids.iter().any(|existing| existing == id) {
+            ids.push(id.to_string());
+        }
+    };
+    if let Some(claude) = models.claude.as_ref() {
+        for value in [
+            &claude.model,
+            &claude.haiku_model,
+            &claude.sonnet_model,
+            &claude.opus_model,
+            &claude.fable_model,
+            &claude.subagent_model,
+        ] {
+            push(value.as_ref());
+        }
+    }
+    push(models.codex.as_ref().and_then(|m| m.model.as_ref()));
+    push(models.gemini.as_ref().and_then(|m| m.model.as_ref()));
+    push(models.grokbuild.as_ref().and_then(|m| m.model.as_ref()));
+
+    // 只有一张模型表时窗口属于它；Codex 的顶层窗口同理。
+    let window = match app {
+        AppType::GrokBuild => parse_config_toml(&provider.settings_config)
+            .as_ref()
+            .and_then(grok_default_entry)
+            .and_then(|entry| entry.get("context_window"))
+            .and_then(|value| value.as_integer())
+            .and_then(|value| u64::try_from(value).ok()),
+        AppType::Codex => parse_config_toml(&provider.settings_config)
+            .as_ref()
+            .and_then(|doc| doc.get("model_context_window"))
+            .and_then(|value| value.as_integer())
+            .and_then(|value| u64::try_from(value).ok()),
+        _ => None,
+    };
+
+    ids.into_iter()
+        .map(|id| AvailableModel {
+            id,
+            display_name: None,
+            context_window: window,
+            efforts: Vec::new(),
+            default_effort: None,
+            max_output: None,
+        })
+        .collect()
+}
+
+/// 把一份 per-app 配置转成统一供应商（深链接导入用）。
+///
+/// 链接只描述一个应用的模型与连接；统一供应商把这份配置放进该应用的模型块，其余
+/// 应用按各自的默认值同步。字段映射与 per-app 迁移共用同一套规则，避免两条「转成
+/// 统一供应商」的路各写一遍、慢慢长歪。
+///
+/// `provider` 应当是一份已经过新增校验的行（`ProviderService::prepare_new_provider`），
+/// 凭据覆盖、Claude 模型补全等规范化都已做过；这里只做字段搬运。
+pub fn universal_from_provider(
+    app: &AppType,
+    provider: &Provider,
+) -> Result<UniversalProvider, AppError> {
+    let (base_url, api_key) =
+        extract_endpoint(app, &provider.settings_config).ok_or_else(|| {
+            AppError::InvalidInput(format!(
+                "Cannot derive the API endpoint and key for '{}' from the provider configuration",
+                app.as_str()
+            ))
+        })?;
+
+    let mut models = model_config_for(app, &provider.settings_config).unwrap_or_default();
+    // Claude 的上游兼容开关住在 env 里，和迁移一样叠到模型块上（投影会再写回 env）。
+    if matches!(app, AppType::Claude) {
+        if let (Some(claude), Some(switches)) = (
+            models.claude.as_mut(),
+            claude_switches(&provider.settings_config),
+        ) {
+            claude.enable_tool_search = switches.enable_tool_search;
+            claude.disable_artifact = switches.disable_artifact;
+            claude.disable_auto_mode_server = switches.disable_auto_mode_server;
+        }
+    }
+    merge_meta_into_models(app, provider.meta.as_ref(), &mut models);
+
+    let mut meta = ProviderMeta::default();
+    if let Some(source) = provider.meta.as_ref() {
+        merge_meta(&mut meta, source);
+    }
+    // 旧版本仍按这个标记合并通用配置片段：深链接新建行和表单新增保持一致。
+    if matches!(app, AppType::Claude | AppType::Codex | AppType::Gemini)
+        && meta.common_config_enabled.is_none()
+    {
+        meta.common_config_enabled = Some(true);
+    }
+
+    let available_models = seed_available_models(app, provider, &models);
+    Ok(UniversalProvider {
+        id: provider.id.clone(),
+        name: provider.name.clone(),
+        apps: UniversalProviderApps::all(),
+        base_url,
+        api_key,
+        models,
+        available_models,
+        website_url: provider.website_url.clone(),
+        notes: provider.notes.clone(),
+        icon: provider.icon.clone(),
+        icon_color: provider.icon_color.clone(),
+        meta: Some(meta),
+        created_at: provider
+            .created_at
+            .or_else(|| Some(chrono::Utc::now().timestamp_millis())),
+        sort_index: None,
+    })
 }
 
 /// 执行迁移：把 per-app 供应商合并成统一供应商。
@@ -722,6 +873,101 @@ mod tests {
             .db
             .save_provider(app.as_str(), &provider)
             .expect("save");
+    }
+
+    #[test]
+    fn universal_from_provider_keeps_the_source_apps_model_and_opens_all_apps() {
+        // 深链接导入走这条：链接描述一个应用，转换后这份配置落在它的模型块里，
+        // 其余应用没配置（投影时各用自己的默认值）。
+        let mut provider = Provider::with_id(
+            "relay-a".to_string(),
+            "Relay A".to_string(),
+            claude_settings("https://gw.example/v1", "sk-shared", "claude-sonnet-5"),
+            Some("https://gw.example".to_string()),
+        );
+        provider.notes = Some("from link".to_string());
+        provider.icon = Some("anthropic".to_string());
+
+        let universal = universal_from_provider(&AppType::Claude, &provider).expect("convert");
+
+        assert_eq!(universal.id, "relay-a");
+        assert_eq!(universal.name, "Relay A");
+        assert_eq!(universal.base_url, "https://gw.example/v1");
+        assert_eq!(universal.api_key, "sk-shared");
+        assert_eq!(universal.website_url.as_deref(), Some("https://gw.example"));
+        assert_eq!(universal.notes.as_deref(), Some("from link"));
+        assert_eq!(universal.icon.as_deref(), Some("anthropic"));
+        assert!(universal.apps.is_all(), "统一供应商同步到全部应用");
+        assert_eq!(
+            universal
+                .models
+                .claude
+                .as_ref()
+                .and_then(|m| m.model.as_deref()),
+            Some("claude-sonnet-5")
+        );
+        assert!(universal.models.codex.is_none());
+        assert!(universal.models.gemini.is_none());
+        // 链接里的模型种进可用模型列表：导入后模型下拉就有值，不用先拉一次 /v1/models。
+        assert_eq!(
+            universal
+                .available_models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["claude-sonnet-5"]
+        );
+        // 新建行与表单新增同一口径：旧版本仍按这个标记合并通用配置片段。
+        assert_eq!(
+            universal
+                .meta
+                .as_ref()
+                .and_then(|m| m.common_config_enabled),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn universal_from_provider_maps_link_api_format_to_grok_api_backend() {
+        let mut provider = Provider::with_id(
+            "grok-relay".to_string(),
+            "Grok Relay".to_string(),
+            json!({
+                "config": "[models]\ndefault = \"grok-4.6\"\n\n[model.\"grok-4.6\"]\n\
+                           model = \"grok-4.6\"\nbase_url = \"https://gw.example/v1\"\n\
+                           name = \"Grok Relay\"\napi_key = \"xai-key\"\n\
+                           api_backend = \"responses\"\ncontext_window = 256000\n"
+            }),
+            None,
+        );
+        provider.meta = Some(ProviderMeta {
+            api_format: Some("openai_chat".to_string()),
+            ..Default::default()
+        });
+
+        let universal = universal_from_provider(&AppType::GrokBuild, &provider).expect("convert");
+        assert_eq!(
+            universal
+                .models
+                .grokbuild
+                .as_ref()
+                .and_then(|m| m.api_backend.as_deref()),
+            Some("chat_completions"),
+            "链接的 apiFormat 应换算成 Grok Build 的 api_backend"
+        );
+    }
+
+    #[test]
+    fn universal_from_provider_rejects_a_config_without_an_endpoint() {
+        let provider = Provider::with_id(
+            "broken".to_string(),
+            "Broken".to_string(),
+            json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "sk" } }),
+            None,
+        );
+        let error = universal_from_provider(&AppType::Claude, &provider)
+            .expect_err("missing endpoint must be rejected");
+        assert!(error.to_string().contains("Cannot derive"), "{error}");
     }
 
     #[test]

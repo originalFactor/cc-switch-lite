@@ -867,7 +867,7 @@ pub struct UniversalProviderSyncedEvent {
     pub id: String,
 }
 
-fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
+pub(crate) fn emit_universal_provider_synced(app: &AppHandle, action: &str, id: &str) {
     let _ = app.emit(
         "universal-provider-synced",
         UniversalProviderSyncedEvent {
@@ -907,7 +907,7 @@ pub fn upsert_universal_provider(
     Ok(result)
 }
 
-/// 拉取可用模型列表（`/v1/models` + models.dev 补全）。
+/// 拉取可用模型列表（`/v1/models` + oh-my-pi 模型目录补全）。
 ///
 /// 传 `id` 用已存那家的地址与 Key 并写回它；不传时用 `baseUrl`/`apiKey` 现拉，
 /// 结果只返回给前端（新建时还没有 id）。

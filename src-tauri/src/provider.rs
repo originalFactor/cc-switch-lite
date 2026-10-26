@@ -864,20 +864,20 @@ pub struct UniversalProviderModels {
     pub grokbuild: Option<GrokBuildModelConfig>,
 }
 
-/// 供应商可用模型的一条：`/v1/models` 的 id 配上 models.dev 的名称和上下文窗口。
+/// 供应商可用模型的一条：`/v1/models` 的 id 配上 oh-my-pi 模型目录里的名称和上下文窗口。
 ///
 /// 统一供应商所有应用共用这一份列表，表单里的模型字段只从这里选。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AvailableModel {
     /// 模型 id，直接拿去填各应用的模型字段。
     pub id: String,
-    /// 显示名：models.dev 的 `name`，取不到时回退成 id。
+    /// 显示名：模型目录的 `name`，取不到时回退成 id。
     #[serde(rename = "displayName", skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    /// 上下文窗口：models.dev 的 `limit.context`，取不到就不写。
+    /// 上下文窗口：模型目录的 `contextWindow`，取不到就不写。
     #[serde(rename = "contextWindow", skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
-    /// effort 档位：models.dev `reasoning_options` 里 `type: "effort"` 的并集，
+    /// effort 档位：模型目录 `thinking.efforts` 的并集，
     /// 用户可在表单里逐模型改。空表示没声明。
     #[serde(rename = "efforts", default, skip_serializing_if = "Vec::is_empty")]
     pub efforts: Vec<String>,
@@ -885,7 +885,7 @@ pub struct AvailableModel {
     /// `default_reasoning_level`，由后端按模板缺省兜底。
     #[serde(rename = "defaultEffort", skip_serializing_if = "Option::is_none")]
     pub default_effort: Option<String>,
-    /// 最大输出 tokens：models.dev 的 `limit.output`，取不到就不写。
+    /// 最大输出 tokens：模型目录的 `maxTokens`，取不到就不写。
     #[serde(rename = "maxOutput", skip_serializing_if = "Option::is_none")]
     pub max_output: Option<u64>,
 }
@@ -908,7 +908,7 @@ pub struct UniversalProvider {
     /// 各应用的模型配置
     #[serde(default)]
     pub models: UniversalProviderModels,
-    /// 从 `/v1/models` 拉取、再用 models.dev 补全的可用模型列表。所有应用共用。
+    /// 从 `/v1/models` 拉取、再用 oh-my-pi 模型目录补全的可用模型列表。所有应用共用。
     #[serde(
         rename = "availableModels",
         default,
@@ -1194,7 +1194,7 @@ model = "{model}"
 model_reasoning_effort = "{reasoning_effort}"
 disable_response_storage = true"#
         );
-        // 上下文窗口跟随所选模型行的元数据（models.dev limit.context），有才写
+        // 上下文窗口跟随所选模型行的元数据（模型目录的 contextWindow），有才写
         // （交给 Codex 默认）。压缩阈值存的是百分比，按同一个窗口换算成绝对
         // token 数；没有窗口元数据时算不出来，整条不写。
         let context_window = models.and_then(|m| m.model.clone()).and_then(|model| {
@@ -1250,8 +1250,8 @@ requires_openai_auth = true"#
             "config": config_toml
         });
         // 模型目录：用户填了行就用它；没填时用统一供应商的可用模型列表自动生成，
-        // 名称、上下文窗口、effort 档位与默认档都是逐模型（拉取时由 models.dev
-        // api.json 补全，表单里可改）。两者都没有就不写目录（和没配区分开）。
+        // 名称、上下文窗口、effort 档位与默认档都是逐模型（拉取时由 oh-my-pi
+        // 模型目录补全，表单里可改）。两者都没有就不写目录（和没配区分开）。
         let catalog = models
             .map(|m| m.catalog_models.clone())
             .filter(|c| !c.is_empty())
@@ -1302,13 +1302,13 @@ requires_openai_auth = true"#
             .and_then(|m| m.impersonate_claude_code)
             .filter(|v| *v);
         // max_output_tokens：用户手填优先；没填时从所选模型行的元数据
-        // （models.dev limit.output）自动补——与表单的自动预填同源。
+        // （模型目录的 maxTokens）自动补——与表单的自动预填同源。
         let selected_row = models.and_then(|m| m.model.clone()).and_then(|model| {
             self.available_models
                 .iter()
                 .find(|row| row.id.trim() == model.trim())
         });
-        // 最大输出：跟所选模型行的元数据（models.dev limit.output）。
+        // 最大输出：跟所选模型行的元数据（模型目录的 maxTokens）。
         meta.max_output_tokens = selected_row
             .and_then(|row| row.max_output)
             .filter(|t| *t > 0);
@@ -1434,7 +1434,7 @@ requires_openai_auth = true"#
         // 映射模式下没存 1M 声明的档（统一供应商新表单不再手勾），按所选上游模型
         // 的上下文窗口元数据判定；显式存了 true / false 的照旧（老数据兼容）。
         // 菜单显示名同理：没存 labelOverride 时取所选模型行的 displayName
-        // （models.dev 的名称），取不到就不写，由 Desktop 回退成模型名。
+        // （模型目录的名称），取不到就不写，由 Desktop 回退成模型名。
         if !direct {
             for route in routes.values_mut() {
                 if route.supports_1m.is_none() {
@@ -2740,7 +2740,7 @@ context_window = 2000000
         assert_eq!(rows[0]["model"], json!("gpt-5.6-sol"));
         assert_eq!(rows[0]["displayName"], json!("GPT-5.6 Sol"));
         assert_eq!(rows[0]["contextWindow"], json!(1_050_000));
-        // models.dev 没补到的字段就不写，交给后端默认值
+        // 模型目录没补到的字段就不写，交给后端默认值
         assert_eq!(rows[1]["model"], json!("plain-id"));
         assert!(rows[1].get("displayName").is_none());
         assert!(rows[1].get("contextWindow").is_none());
@@ -3053,7 +3053,7 @@ context_window = 2000000
 
     #[test]
     fn universal_desktop_provider_derives_menu_label_from_model_metadata() {
-        // 菜单显示名没存时取所选模型行的 displayName（models.dev 的名称）；
+        // 菜单显示名没存时取所选模型行的 displayName（模型目录的名称）；
         // 该行没有名字时留空，由 Desktop 回退成模型名。显式存的值优先。
         let mut universal = universal_with_apps(
             "desktop-label",

@@ -59,6 +59,14 @@ const API_FORMAT_LABELS: Record<string, string> = {
   gemini_native: "Gemini",
 };
 
+/** 链接里的 app 标识 → 产品名。确认框说明导入范围时显示产品名。 */
+const SOURCE_APP_LABELS: Record<string, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  gemini: "Gemini CLI",
+  grokbuild: "Grok Build",
+};
+
 /**
  * 「导入后立即生效」开关的初始值：链接里的 `enabled` 只是建议，导入时以开关为准。
  * 这个分支里每个应用都是切换式的，所以默认关闭；提示词同样由用户在确认框里决定。
@@ -299,12 +307,11 @@ export function DeepLinkImportDialog() {
       // Handle different result types
       if ("type" in result) {
         if (result.type === "provider") {
-          await queryClient.invalidateQueries({
-            queryKey: ["providers", request.app],
-          });
+          // 导入会生成统一供应商并同步出五个应用的子卡，每个应用的列表都要刷新。
+          await queryClient.invalidateQueries({ queryKey: ["providers"] });
           await refreshTrayMenu();
           toast.success(t("deeplink.importSuccess"), {
-            description: t("deeplink.importSuccessDescription", {
+            description: t("deeplink.universalImportSuccessDescription", {
               name: request.name,
             }),
             closeButton: true,
@@ -346,12 +353,10 @@ export function DeepLinkImportDialog() {
         await refreshMcp(result);
       } else {
         // Legacy return type (string ID) - assume provider
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", request.app],
-        });
+        await queryClient.invalidateQueries({ queryKey: ["providers"] });
         await refreshTrayMenu();
         toast.success(t("deeplink.importSuccess"), {
-          description: t("deeplink.importSuccessDescription", {
+          description: t("deeplink.universalImportSuccessDescription", {
             name: request.name,
           }),
           closeButton: true,
@@ -379,6 +384,10 @@ export function DeepLinkImportDialog() {
     request?.apiKey && request.apiKey.length > 4
       ? `${request.apiKey.substring(0, 4)}${"*".repeat(20)}`
       : "****";
+
+  const sourceAppName = request?.app
+    ? (SOURCE_APP_LABELS[request.app] ?? request.app)
+    : "";
 
   // Check if config file is present
   const hasConfigFile = !!(request?.config || request?.configUrl);
@@ -489,11 +498,16 @@ export function DeepLinkImportDialog() {
                   {/* App Type */}
                   <div className="grid grid-cols-3 items-center gap-4">
                     <div className="font-medium text-sm text-fg-2">
-                      {t("deeplink.app")}
+                      {t("deeplink.providerSourceApp")}
                     </div>
-                    <div className="col-span-2 text-sm font-medium capitalize">
-                      {request.app}
+                    <div className="col-span-2 text-sm font-medium">
+                      {sourceAppName}
                     </div>
+                  </div>
+
+                  {/* 链接只描述一个应用，导入后是同步到全部应用统一供应商 */}
+                  <div className="rounded-lg bg-surface p-3 text-sm text-fg-2">
+                    {t("deeplink.universalImportHint", { app: sourceAppName })}
                   </div>
 
                   {/* Provider Name */}
@@ -957,7 +971,11 @@ export function DeepLinkImportDialog() {
                   {activateAfterImport && (
                     <div className="text-warning-text text-sm flex items-start gap-2">
                       <span aria-hidden="true">⚠️</span>
-                      <span>{t("deeplink.providerEnabledWarning")}</span>
+                      <span>
+                        {t("deeplink.providerEnabledWarning", {
+                          app: sourceAppName,
+                        })}
+                      </span>
                     </div>
                   )}
 

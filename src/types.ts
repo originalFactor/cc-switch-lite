@@ -134,7 +134,7 @@ export type CodexChatEffortValueMode =
   // OpenRouter effort 枚举 xhigh|high|medium|low|minimal（无 max，max 钳到 xhigh）
   | "openrouter"
   // OpenCode Zen 网关：合法档位逐模型，见 modelCatalog 各条目 reasoningLevels
-  // （镜像 models.dev）；代理转换层按请求模型查表钳制，无表不发 effort 字段
+  // （镜像 oh-my-pi 模型目录）；代理转换层按请求模型查表钳制，无表不发 effort 字段
   | "zen";
 
 export type CodexChatReasoningOutputFormat =
@@ -865,16 +865,16 @@ export interface UniversalProviderModels {
   grokbuild?: GrokBuildModelConfig;
 }
 
-/** 统一供应商的一条可用模型：`/v1/models` 的 id + models.dev 的名称与上下文窗口。 */
+/** 统一供应商的一条可用模型：`/v1/models` 的 id + oh-my-pi 模型目录的名称与上下文窗口。 */
 export interface AvailableModel {
   id: string;
   displayName?: string;
   contextWindow?: number;
-  /** effort 档位（models.dev reasoning_options 的并集），逐模型可改；空表示没声明。 */
+  /** effort 档位（模型目录 thinking.efforts 的并集），逐模型可改；空表示没声明。 */
   efforts?: string[];
   /** 默认 effort 档位（efforts 的子集）；不设则目录不写 defaultReasoningLevel。 */
   defaultEffort?: string;
-  /** 最大输出 tokens（models.dev limit.output），逐模型可改；空表示没声明。 */
+  /** 最大输出 tokens（模型目录的 maxTokens），逐模型可改；空表示没声明。 */
   maxOutput?: number;
 }
 
@@ -886,7 +886,7 @@ export interface UniversalProvider {
   baseUrl: string;
   apiKey: string;
   models: UniversalProviderModels;
-  /** 从 `/v1/models` 拉取、models.dev 补全的可用模型列表；所有应用共用。 */
+  /** 从 `/v1/models` 拉取、oh-my-pi 模型目录补全的可用模型列表；所有应用共用。 */
   availableModels?: AvailableModel[];
   websiteUrl?: string;
   notes?: string;

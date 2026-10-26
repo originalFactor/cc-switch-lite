@@ -44,6 +44,7 @@ pub fn merge_deeplink_config(
 /// Import a provider from a deep link request (legacy, kept for compatibility)
 #[tauri::command]
 pub fn import_from_deeplink(
+    app: tauri::AppHandle,
     state: State<AppState>,
     request: DeepLinkImportRequest,
 ) -> Result<String, String> {
@@ -54,6 +55,8 @@ pub fn import_from_deeplink(
     );
 
     let provider_id = import_provider_from_deeplink(&state, request).map_err(|e| e.to_string())?;
+    // 深链接导入生成的是统一供应商：通知已打开的页面刷新各应用列表与托盘。
+    super::provider::emit_universal_provider_synced(&app, "import", &provider_id);
 
     log::info!("Successfully imported provider with ID: {provider_id}");
 
@@ -63,6 +66,7 @@ pub fn import_from_deeplink(
 /// Import resource from a deep link request (unified handler)
 #[tauri::command]
 pub async fn import_from_deeplink_unified(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     request: DeepLinkImportRequest,
 ) -> Result<serde_json::Value, String> {
@@ -72,6 +76,7 @@ pub async fn import_from_deeplink_unified(
         "provider" => {
             let provider_id =
                 import_provider_from_deeplink(&state, request).map_err(|e| e.to_string())?;
+            super::provider::emit_universal_provider_synced(&app, "import", &provider_id);
             Ok(serde_json::json!({
                 "type": "provider",
                 "id": provider_id

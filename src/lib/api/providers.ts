@@ -244,7 +244,7 @@ export const universalProvidersApi = {
   },
 
   /**
-   * 拉取可用模型列表（`/v1/models` + models.dev 补全）。
+   * 拉取可用模型列表（`/v1/models` + oh-my-pi 模型目录补全）。
    *
    * 传 `id` 时用已存那家的地址与 Key，并把结果写回它；新建时还没有 id，改传
    * `baseUrl`/`apiKey` 现拉，结果只返回给表单。

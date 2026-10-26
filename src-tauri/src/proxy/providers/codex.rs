@@ -583,7 +583,7 @@ pub fn resolve_codex_chat_reasoning_config(
         infer_codex_chat_reasoning_config(provider, body)?
     };
 
-    // zen 的合法 effort 档位是逐模型的（models.dev：glm-5.2 仅 high|max、
+    // zen 的合法 effort 档位是逐模型的（模型目录：glm-5.2 仅 high|max、
     // kimi-k3 仅 max、qwen/glm-5.1 等为 toggle 型无 effort），opencode 客户端
     // 也严格按模型声明发值。按请求模型从 modelCatalog 的 reasoningLevels
     // （#6228 引入的逐模型声明）查表附上；查不到（模型未收录 / 条目未声明
@@ -596,7 +596,7 @@ pub fn resolve_codex_chat_reasoning_config(
 }
 
 /// 按请求模型从供应商 modelCatalog 查 Zen 合法 effort 档位（逐模型数据镜像
-/// models.dev 的 reasoning_options effort values）。仅做档位查表，不参与平台
+/// 模型目录的 thinking.efforts）。仅做档位查表，不参与平台
 /// 判定——平台身份仍只由 name/base_url 决定（见 infer_aggregator_platform_config）。
 /// DB SSOT 为 camelCase，手写/旧数据可能为 snake_case，双格式兼容（与表单加载侧一致）。
 fn zen_catalog_effort_levels(provider: &Provider, body: &JsonValue) -> Option<Vec<String>> {
@@ -834,7 +834,7 @@ fn infer_aggregator_platform_config(
     // OpenCode Zen（opencode.ai 网关，issue #6112）：其自家客户端对该传输发顶层
     // `reasoning_effort`（provider/transform.ts），平台归一参数；不发厂商原生
     // thinking 形状（glm 模型走 zen 时套智谱 thinking:{type} 网关不认）。
-    // 合法档位逐模型（models.dev 的 reasoning_options，opencode 客户端同样严格
+    // 合法档位逐模型（模型目录的 thinking.efforts，opencode 客户端同样严格
     // 按模型声明发值）：具体档位表见供应商 modelCatalog 各条目的 reasoningLevels，
     // 代理由此按请求模型查表钳制（resolve 处附上 effort_levels），无表不发字段。
     // 匹配域名而非裸 "opencode"，避免误伤名字含 opencode 的无关供应商。

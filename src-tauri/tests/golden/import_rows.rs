@@ -1,7 +1,8 @@
 //! ① 深链导入、首启导入写出的 DB 原始行。
 //!
 //! 重构不动数据库（不升 schema、不回填、不剥离存量行），降级后旧版直接读这些行，
-//! 所以新增供应商时写进 DB 的字节要保持原样。
+//! 所以新增供应商时写进 DB 的字节要保持原样。深链导入现在生成统一供应商，再同步出
+//! 各应用的子卡；这里锁的是子卡的行形状（旧版同样能读，只是不再有统一供应商的编辑入口）。
 
 use cc_switch_lib::{
     import_default_config_test_hook, import_provider_from_deeplink, parse_deeplink_url, AppType,

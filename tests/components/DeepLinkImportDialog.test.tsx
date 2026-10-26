@@ -197,6 +197,30 @@ describe("DeepLinkImportDialog", () => {
     });
   });
 
+  it("tells the user a provider link becomes a unified provider synced to all apps", async () => {
+    render(<DeepLinkImportDialog />, { wrapper: Wrapper });
+
+    act(() => {
+      deliverDeepLink({
+        version: "v1",
+        resource: "provider",
+        app: "codex",
+        name: "Unified Provider",
+        homepage: "https://example.com",
+        endpoint: "https://api.example.com",
+        apiKey: "sk-provider-key",
+      });
+    });
+
+    // 链接只描述一个应用；确认框要说明导入后会同步到全部五个应用。
+    await waitFor(() => {
+      expect(
+        screen.getByText("deeplink.universalImportHint"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("deeplink.providerSourceApp")).toBeInTheDocument();
+  });
+
   it("does not show the switch warning when enabled is absent", async () => {
     render(<DeepLinkImportDialog />, { wrapper: Wrapper });
 

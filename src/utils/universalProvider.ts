@@ -82,7 +82,7 @@ export function isUniversalChildId(
 
 /**
  * effort 档位全集（预置顺序即展示/写入顺序）。用户在统一供应商里勾选启用哪些；
- * 勾选集与各模型元数据（models.dev reasoning_options）求交集后写进目录的
+ * 勾选集与各模型元数据（模型目录 thinking.efforts）求交集后写进目录的
  * `reasoningLevels`，并约束 effort 下拉的选项。
  */
 export const EFFORT_PRESETS = [
@@ -110,7 +110,7 @@ export function compactLimitFrom(
 }
 
 /**
- * effort 下拉的选项：模型行声明的档位（models.dev reasoning_options 的并集，拉取时补全、
+ * effort 下拉的选项：模型行声明的档位（模型目录 thinking.efforts 的并集，拉取时补全、
  * 模型列表编辑器里可改）与预置全集求交集；该行没声明档位时退回预置全集。
  *
  * 已存的值不在结果里时（旧记录的手填值，或模型撤下了这个档）补到末尾，免得下拉因为

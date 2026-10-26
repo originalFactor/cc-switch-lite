@@ -218,7 +218,7 @@ describe("AvailableModelsEditor — 逐模型思考等级", () => {
   });
 
   it("声明顺序乱掉的档位按预置升序显示", async () => {
-    // 拉取的档位来自 models.dev 的声明顺序（同名模型跨供应商并集保持首现序），
+    // 拉取的档位来自 oh-my-pi 模型目录的声明顺序（同名模型跨供应商并集保持首现序），
     // 可能是乱的。触发器标签必须按预置序重排，不是照抄输入顺序。
     const user = userEvent.setup();
     render(

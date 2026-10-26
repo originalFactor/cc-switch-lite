@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import en from "@/i18n/locales/en.json";
-import ja from "@/i18n/locales/ja.json";
-import zhTW from "@/i18n/locales/zh-TW.json";
 import zh from "@/i18n/locales/zh.json";
 
 type TranslationTree = Record<string, unknown>;
@@ -29,14 +27,7 @@ function interpolationVariables(value: string): string[] {
 }
 
 const reference = flattenStrings(en);
-const locales = [
-  ["zh", zh],
-  ["ja", ja],
-  ["zh-TW", zhTW],
-] as const;
-
-/** 历史遗留：zh-TW 比 en 多这一条，不在收敛范围内。 */
-const KNOWN_EXTRA_KEYS = new Set(["settings.oneClickInstall"]);
+const locales = [["zh", zh]] as const;
 
 /**
  * 这几条文案各语言刻意用不同的占位符表达同一件事：zh 用 `{{month}}/{{day}}` 而非
@@ -67,7 +58,7 @@ describe("locale coverage", () => {
   it.each(locales)("has no unexpected extra key in %s", (_name, tree) => {
     const translations = flattenStrings(tree as TranslationTree);
     const extra = [...translations.keys()].filter(
-      (key) => !reference.has(key) && !KNOWN_EXTRA_KEYS.has(key),
+      (key) => !reference.has(key),
     );
 
     expect(extra).toEqual([]);

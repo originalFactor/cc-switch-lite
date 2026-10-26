@@ -18,13 +18,13 @@ describe("syncLanguageFromSettings", () => {
   });
 
   it("overrides a stale cached language", async () => {
-    await i18n.changeLanguage("ja");
-    localStorage.setItem("language", "ja");
+    await i18n.changeLanguage("en");
+    localStorage.setItem("language", "en");
 
-    syncLanguageFromSettings("zh-TW");
+    syncLanguageFromSettings("zh");
 
-    expect(i18n.language).toBe("zh-TW");
-    expect(localStorage.getItem("language")).toBe("zh-TW");
+    expect(i18n.language).toBe("zh");
+    expect(localStorage.getItem("language")).toBe("zh");
   });
 
   it("leaves the current language alone when nothing is saved", async () => {

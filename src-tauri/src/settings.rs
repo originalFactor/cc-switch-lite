@@ -630,12 +630,17 @@ impl AppSettings {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
 
-        self.language = self
-            .language
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| matches!(*s, "en" | "zh" | "zh-TW" | "ja"))
-            .map(|s| s.to_string());
+        // 界面语言只剩 zh / en：旧版存下的 zh-TW 归入 zh，其它（如已移除的 ja）丢弃，
+        // 下次启动按系统语言重新选。
+        self.language = self.language.as_ref().map(|s| s.trim()).and_then(|s| {
+            if s.starts_with("zh") {
+                Some("zh".to_string())
+            } else if s == "en" {
+                Some("en".to_string())
+            } else {
+                None
+            }
+        });
 
         self.quota_display = self
             .quota_display
@@ -1217,6 +1222,23 @@ mod tests {
         .expect("visible apps");
 
         assert!(!visible.is_visible(&AppType::ClaudeDesktop));
+    }
+
+    #[test]
+    fn language_migrates_removed_locales_to_the_remaining_ones() {
+        let normalize = |language: &str| {
+            let mut settings = AppSettings {
+                language: Some(language.to_string()),
+                ..AppSettings::default()
+            };
+            settings.normalize_paths();
+            settings.language
+        };
+
+        assert_eq!(normalize("zh"), Some("zh".to_string()));
+        assert_eq!(normalize("zh-TW"), Some("zh".to_string()));
+        assert_eq!(normalize("en"), Some("en".to_string()));
+        assert_eq!(normalize("ja"), None);
     }
 
     #[test]

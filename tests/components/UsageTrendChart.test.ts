@@ -121,7 +121,6 @@ describe("formatUsageTrendTickLabel", () => {
 describe("formatUsageTrendTokenTickLabel", () => {
   it("uses localized compact units for large token axis ticks", () => {
     const zhFormatter = createUsageTrendTokenTickFormatter("zh-CN");
-    const zhTwFormatter = createUsageTrendTokenTickFormatter("zh-TW");
     const enFormatter = createUsageTrendTokenTickFormatter("en-US");
 
     expect(formatUsageTrendTokenTickLabel(600_000_000, zhFormatter)).toBe(
@@ -130,8 +129,8 @@ describe("formatUsageTrendTokenTickLabel", () => {
     expect(formatUsageTrendTokenTickLabel(1_950_000_000, zhFormatter)).toBe(
       "19.5亿",
     );
-    expect(formatUsageTrendTokenTickLabel(65_000_000, zhTwFormatter)).toBe(
-      "6500萬",
+    expect(formatUsageTrendTokenTickLabel(65_000_000, zhFormatter)).toBe(
+      "6500万",
     );
     expect(formatUsageTrendTokenTickLabel(600_000_000, enFormatter)).toBe(
       "600M",

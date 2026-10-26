@@ -58,7 +58,8 @@ describe("useSettingsForm Hook", () => {
     expect(changeLanguageSpy).toHaveBeenCalledWith("en");
   });
 
-  it("should support japanese language preference from server data", async () => {
+  it("should fall back to Simplified Chinese for a removed language preference", async () => {
+    (i18n as any).language = "en";
     useSettingsQueryMock.mockReturnValue({
       data: {
         showInTray: true,
@@ -74,14 +75,15 @@ describe("useSettingsForm Hook", () => {
     const { result } = renderHook(() => useSettingsForm());
 
     await waitFor(() => {
-      expect(result.current.settings?.language).toBe("ja");
+      expect(result.current.settings?.language).toBe("zh");
     });
 
-    expect(result.current.initialLanguage).toBe("ja");
-    expect(changeLanguageSpy).toHaveBeenCalledWith("ja");
+    expect(result.current.initialLanguage).toBe("zh");
+    expect(changeLanguageSpy).toHaveBeenCalledWith("zh");
   });
 
-  it("should support traditional chinese language preference aliases", async () => {
+  it("should map any Chinese variant to Simplified Chinese", async () => {
+    (i18n as any).language = "en";
     useSettingsQueryMock.mockReturnValue({
       data: {
         showInTray: true,
@@ -97,11 +99,11 @@ describe("useSettingsForm Hook", () => {
     const { result } = renderHook(() => useSettingsForm());
 
     await waitFor(() => {
-      expect(result.current.settings?.language).toBe("zh-TW");
+      expect(result.current.settings?.language).toBe("zh");
     });
 
-    expect(result.current.initialLanguage).toBe("zh-TW");
-    expect(changeLanguageSpy).toHaveBeenCalledWith("zh-TW");
+    expect(result.current.initialLanguage).toBe("zh");
+    expect(changeLanguageSpy).toHaveBeenCalledWith("zh");
   });
 
   it("should prioritize reading language from local storage in readPersistedLanguage", () => {

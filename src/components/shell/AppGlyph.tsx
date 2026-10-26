@@ -3,7 +3,7 @@ import type { AppId } from "@/lib/api";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { cn } from "@/lib/utils";
 
-/** 应用名：品牌名不翻译，四种语言都写原文。 */
+/** 应用名：品牌名不翻译，所有语言都写原文。 */
 export const APP_DISPLAY_NAME: Record<AppId, string> = {
   claude: "Claude Code",
   "claude-desktop": "Claude Desktop",

@@ -4,30 +4,22 @@
     {
       "type": "new",
       "zh": "「应用」页现在可安装、升级、卸载，装了多处时可选择卸载哪一处",
-      "zh-TW": "「應用」頁現在可安裝、升級、解除安裝，裝了多處時可選擇解除安裝哪一處",
-      "en": "The Apps page installs, updates and uninstalls tools, and lets you pick which duplicate to remove",
-      "ja": "「アプリ」ページでインストール・更新・アンインストール、重複時は削除先を選択"
+      "en": "The Apps page installs, updates and uninstalls tools, and lets you pick which duplicate to remove"
     },
     {
       "type": "new",
       "zh": "供应商图标可上传自己的图片，存进「我的图标」供其他供应商选用",
-      "zh-TW": "供應商圖示可上傳自己的圖片，存進「我的圖示」供其他供應商選用",
-      "en": "Upload your own provider icon; it is kept in a My Icons library other providers can pick from",
-      "ja": "プロバイダーのアイコンに自分の画像をアップロード可能に"
+      "en": "Upload your own provider icon; it is kept in a My Icons library other providers can pick from"
     },
     {
       "type": "new",
       "zh": "深链接可选接口格式、带自己的图标，并保留 Codex / Grok 配置",
-      "zh-TW": "深連結可選介面格式、帶自己的圖示，並保留 Codex / Grok 設定",
-      "en": "Deep links declare the API format, bring their own icon, and keep a Codex or Grok Build config",
-      "ja": "ディープリンクで API 形式の指定、アイコン同梱、設定の保持に対応"
+      "en": "Deep links declare the API format, bring their own icon, and keep a Codex or Grok Build config"
     },
     {
       "type": "improve",
       "zh": "用量表新增首字耗时；面板闪烁、搜索框遮挡卡片等已修复",
-      "zh-TW": "用量表新增首字耗時；面板閃爍、搜尋框遮擋卡片等已修正",
-      "en": "Usage tables show first-token time; fixed panel flicker and the search box covering cards",
-      "ja": "使用量テーブルに初回トークン時間を追加、ちらつきと検索欄の重なりを修正"
+      "en": "Usage tables show first-token time; fixed panel flicker and the search box covering cards"
     }
   ]
 }

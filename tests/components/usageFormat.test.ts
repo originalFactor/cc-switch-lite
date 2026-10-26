@@ -16,14 +16,14 @@ import {
 } from "@/components/usage/format";
 
 describe("usage format helpers", () => {
-  it("formats Traditional Chinese token units with Traditional characters", () => {
-    expect(formatTokensShort(12_345, "zh-TW")).toBe("1.2 萬");
-    expect(formatTokensShort(123_456_789, "zh-Hant", 2)).toBe("1.23 億");
+  it("formats Chinese token units with Chinese characters", () => {
+    expect(formatTokensShort(12_345, "zh")).toBe("1.2 万");
+    expect(formatTokensShort(123_456_789, "zh-CN", 2)).toBe("1.23 亿");
   });
 
-  it("resolves Traditional Chinese locale aliases", () => {
-    expect(getLocaleFromLanguage("zh_TW")).toBe("zh-TW");
-    expect(getLocaleFromLanguage("zh-HK")).toBe("zh-TW");
+  it("resolves Chinese locale aliases", () => {
+    expect(getLocaleFromLanguage("zh_CN")).toBe("zh-CN");
+    expect(getLocaleFromLanguage("zh-Hans")).toBe("zh-CN");
   });
 
   it("calculates speed from generation time after the first token", () => {

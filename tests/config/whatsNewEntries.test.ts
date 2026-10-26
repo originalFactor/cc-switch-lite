@@ -9,8 +9,6 @@ import {
 const MAX_ITEMS = 4;
 const MAX_LENGTH: Record<WhatsNewLanguage, number> = {
   zh: 40,
-  "zh-TW": 40,
-  ja: 50,
   en: 100,
 };
 
@@ -85,9 +83,7 @@ describe("what's new entries", () => {
       '4.0.2.json: "version" must match the file name',
       "4.0.2.json items[0]: unknown type news",
       "4.0.2.json items[0]: missing zh",
-      "4.0.2.json items[0]: missing zh-TW",
       "4.0.2.json items[0]: en is longer than 100 characters",
-      "4.0.2.json items[0]: missing ja",
     ]);
   });
 

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSettingsQuery } from "@/lib/query";
 import type { Settings } from "@/types";
 
-type Language = "zh" | "zh-TW" | "en" | "ja";
+type Language = "zh" | "en";
 
 export type SettingsFormState = Omit<Settings, "language"> & {
   language: Language;
@@ -13,25 +13,8 @@ const normalizeLanguage = (lang?: string | null): Language => {
   if (!lang) return "zh";
   const normalized = lang.toLowerCase().replace(/_/g, "-");
 
-  if (normalized === "zh") {
-    return "zh";
-  }
-
-  if (
-    normalized === "zh-tw" ||
-    normalized.startsWith("zh-hant") ||
-    normalized.startsWith("zh-hk") ||
-    normalized.startsWith("zh-mo")
-  ) {
-    return "zh-TW";
-  }
-
-  if (normalized === "en" || normalized === "ja") {
-    return normalized;
-  }
-
-  if (normalized.startsWith("zh")) {
-    return "zh";
+  if (normalized === "en") {
+    return "en";
   }
 
   return "zh";
@@ -40,9 +23,7 @@ const normalizeLanguage = (lang?: string | null): Language => {
 const isSupportedLanguage = (lang?: string | null): boolean => {
   if (!lang) return false;
   const normalized = lang.toLowerCase().replace(/_/g, "-");
-  return (
-    normalized === "en" || normalized === "ja" || normalized.startsWith("zh")
-  );
+  return normalized === "en" || normalized.startsWith("zh");
 };
 
 const sanitizeDir = (value?: string | null): string | undefined => {

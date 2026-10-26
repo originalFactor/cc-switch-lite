@@ -2,16 +2,14 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
 import en from "./locales/en.json";
-import ja from "./locales/ja.json";
 import zh from "./locales/zh.json";
-import zhTW from "./locales/zh-TW.json";
 
-type Language = "zh" | "zh-TW" | "en" | "ja";
+type Language = "zh" | "en";
 
 const DEFAULT_LANGUAGE: Language = "zh";
 
 const isLanguage = (value: unknown): value is Language =>
-  value === "zh" || value === "zh-TW" || value === "en" || value === "ja";
+  value === "zh" || value === "en";
 
 const getInitialLanguage = (): Language => {
   if (typeof window !== "undefined") {
@@ -31,32 +29,15 @@ const getInitialLanguage = (): Language => {
         navigator.languages?.[0]?.toLowerCase())
       : undefined;
 
-  if (navigatorLang === "zh") {
-    return "zh";
-  }
-
-  if (
-    navigatorLang?.startsWith("zh-tw") ||
-    navigatorLang?.startsWith("zh-hk") ||
-    navigatorLang?.startsWith("zh-mo") ||
-    navigatorLang?.startsWith("zh-hant")
-  ) {
-    return "zh-TW";
-  }
-
   if (navigatorLang?.startsWith("zh")) {
     return "zh";
-  }
-
-  if (navigatorLang?.startsWith("ja")) {
-    return "ja";
   }
 
   if (navigatorLang?.startsWith("en")) {
     return "en";
   }
 
-  // 认得出系统语言、但界面没有这种语言（德、法、韩…）时用英文：英文大多数人能读，简中几乎不能
+  // 认得出系统语言、但界面没有这种语言（德、法、日、韩…）时用英文：英文大多数人能读，简中几乎不能
   return navigatorLang ? "en" : DEFAULT_LANGUAGE;
 };
 
@@ -64,14 +45,8 @@ const resources = {
   en: {
     translation: en,
   },
-  ja: {
-    translation: ja,
-  },
   zh: {
     translation: zh,
-  },
-  "zh-TW": {
-    translation: zhTW,
   },
 };
 

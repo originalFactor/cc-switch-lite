@@ -12,14 +12,14 @@ routing proxy.
 
 - **Frontend**: React 18 + TypeScript, Vite 7, TailwindCSS 3.4, shadcn/ui (Radix), TanStack Query v5
 - **Backend**: Rust, Tauri 2, rusqlite (bundled SQLite), tokio, axum/hyper/reqwest for the proxy
-- **UI languages**: Simplified Chinese (`zh`), Traditional Chinese (`zh-TW`), English (`en`), Japanese (`ja`)
+- **UI languages**: Simplified Chinese (`zh`) and English (`en`)
 
 ```
 src/                 Frontend (React + TypeScript)
 src/components/      One directory per feature (providers, mcp, prompts, skills, sessions, proxy, ...)
 src/lib/api/         Tauri invoke wrappers; src/lib/query/ holds TanStack Query config
 src/hooks/           Business logic hooks
-src/i18n/locales/    UI strings: zh.json, zh-TW.json, en.json, ja.json
+src/i18n/locales/    UI strings: zh.json, en.json
 src-tauri/src/       Backend (Rust): commands/ -> services/ -> database/
 src-tauri/src/proxy/ Local routing: forwarding, format conversion, failover, billing
 tests/               Frontend tests (vitest); tests/msw/ holds the Tauri mocks
@@ -121,8 +121,8 @@ cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
 
 ## Internationalization
 
-Every user-facing string goes through i18next's `t()` and must be added to **all four** locale
-files: `src/i18n/locales/{zh,zh-TW,en,ja}.json`. Never hardcode user-visible text. Missing keys fall
+Every user-facing string goes through i18next's `t()` and must be added to **both** locale
+files: `src/i18n/locales/{zh,en}.json`. Never hardcode user-visible text. Missing keys fall
 back to English at runtime instead of failing the build, so verify the locale files yourself —
 `tests/config/localeCoverage.test.ts` guards key parity.
 
@@ -145,7 +145,7 @@ template, and confirm before submitting:
 
 - [ ] `pnpm typecheck`, `pnpm format:check`, `pnpm test:unit`, `pnpm build:renderer` pass
 - [ ] `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` pass when Rust changed
-- [ ] All four locale files updated when user-facing text changed
+- [ ] Both locale files updated when user-facing text changed
 
 AI-assisted contributions are welcome, but you own the result: every line must be understood and
 verified locally. See the AI-Assisted Contributions section of [CONTRIBUTING.md](./CONTRIBUTING.md).

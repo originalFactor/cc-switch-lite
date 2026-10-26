@@ -12,9 +12,7 @@ import {
 const item = (text: string) => ({
   type: "fix" as const,
   zh: text,
-  "zh-TW": text,
   en: text,
-  ja: text,
 });
 
 // 新到旧，和 WHATS_NEW_ENTRIES 的顺序一致
@@ -82,15 +80,14 @@ describe("seen version", () => {
 
 describe("language and links", () => {
   it("falls back to English for unknown languages", () => {
-    expect(resolveWhatsNewLanguage("zh-TW")).toBe("zh-TW");
-    expect(resolveWhatsNewLanguage("ja")).toBe("ja");
+    expect(resolveWhatsNewLanguage("zh")).toBe("zh");
     expect(resolveWhatsNewLanguage("fr")).toBe("en");
   });
 
-  it("links to the website changelog, Traditional Chinese uses the zh pages", () => {
+  it("links to the website changelog", () => {
     expect(changelogUrl("en", "4.0.2")).toBe(
       "https://ccswitch.io/en/changelog/4.0.2",
     );
-    expect(changelogUrl("zh-TW")).toBe("https://ccswitch.io/zh/changelog");
+    expect(changelogUrl("zh")).toBe("https://ccswitch.io/zh/changelog");
   });
 });

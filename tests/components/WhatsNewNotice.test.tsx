@@ -48,9 +48,7 @@ const entry = (version: string, ...texts: string[]): WhatsNewEntry => ({
   items: texts.map((text) => ({
     type: "fix",
     zh: text,
-    "zh-TW": text,
     en: `${text}-en`,
-    ja: `${text}-ja`,
   })),
 });
 

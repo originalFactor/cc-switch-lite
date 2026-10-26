@@ -188,7 +188,7 @@ export function formatEstimatedTokensPerSecond(
 
 /**
  * 表格和指标卡里的 Token 数：1 万以下写全（带千分位），以上压成最多 3 位有效数字
- * （48.2K、189K、18.2M），精确值放进 title。四种语言都用 K/M/B，和画板一致。
+ * （48.2K、189K、18.2M），精确值放进 title。各语言都用 K/M/B，和画板一致。
  */
 export function formatTokensCompact(value: unknown, locale?: string): string {
   const num = parseFiniteNumber(value);
@@ -221,24 +221,10 @@ function normalizeLanguageTag(language: string): string {
   return language.toLowerCase().replace(/_/g, "-");
 }
 
-function isTraditionalChineseLanguage(normalizedLanguage: string): boolean {
-  return (
-    normalizedLanguage === "zh-tw" ||
-    normalizedLanguage.startsWith("zh-hant") ||
-    normalizedLanguage.startsWith("zh-hk") ||
-    normalizedLanguage.startsWith("zh-mo")
-  );
-}
-
 export function getLocaleFromLanguage(language: string): string {
   if (!language) return "en-US";
   const normalized = normalizeLanguageTag(language);
-  if (normalized === "zh") return "zh-CN";
-  if (isTraditionalChineseLanguage(normalized)) {
-    return "zh-TW";
-  }
   if (normalized.startsWith("zh")) return "zh-CN";
-  if (normalized.startsWith("ja")) return "ja-JP";
   return "en-US";
 }
 
@@ -252,16 +238,15 @@ export function getResolvedLang(i18n: I18nLike): string {
 }
 
 function isCjkLanguage(lang: string): boolean {
-  const normalized = normalizeLanguageTag(lang);
-  return normalized.startsWith("zh") || normalized.startsWith("ja");
+  return normalizeLanguageTag(lang).startsWith("zh");
 }
 
-/** 并列的名字：中日文用「、」，其他语言用逗号。 */
+/** 并列的名字：中文用「、」，英文用逗号。 */
 export function joinNames(items: readonly string[], lang: string): string {
   return items.join(isCjkLanguage(lang) ? "、" : ", ");
 }
 
-/** 并列的分句：中日文用「；」，其他语言用分号。 */
+/** 并列的分句：中文用「；」，英文用分号。 */
 export function joinClauses(items: readonly string[], lang: string): string {
   return items.join(isCjkLanguage(lang) ? "；" : "; ");
 }
@@ -269,7 +254,7 @@ export function joinClauses(items: readonly string[], lang: string): string {
 /**
  * Token 数量的紧凑显示。
  *
- * Why: 中日文用户期待 "亿/万" 量纲；英文用户期待 K/M/B。共用同一份格式化
+ * Why: 中文用户期待 "亿/万" 量纲；英文用户期待 K/M/B。共用同一份格式化
  * 逻辑避免 Hero 卡和分应用卡显示不一致。`compactDecimals=2` 用于 Hero
  * 大数副标（更精确），默认 1 位用于卡片副字段。
  */
@@ -281,12 +266,7 @@ export function formatTokensShort(
   if (!Number.isFinite(value) || value <= 0) return "0";
   const decimals = compactDecimals;
   const normalizedLang = normalizeLanguageTag(lang);
-  if (isTraditionalChineseLanguage(normalizedLang)) {
-    if (value >= 1e8) return `${(value / 1e8).toFixed(2)} 億`;
-    if (value >= 1e4) return `${(value / 1e4).toFixed(decimals)} 萬`;
-    return value.toLocaleString("zh-TW");
-  }
-  if (normalizedLang.startsWith("zh") || normalizedLang.startsWith("ja")) {
+  if (normalizedLang.startsWith("zh")) {
     if (value >= 1e8) return `${(value / 1e8).toFixed(2)} 亿`;
     if (value >= 1e4) return `${(value / 1e4).toFixed(decimals)} 万`;
     return value.toLocaleString();

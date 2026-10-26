@@ -36,7 +36,7 @@ const ENCRYPTED_PART_PLACEHOLDER: &str = "[encrypted content omitted]";
 const UNREADABLE_AGENT_TASK_CODE: &str = "unreadable_encrypted_agent_task";
 
 /// 子 agent 读不到任务时返回给 Codex 的说明。
-const UNREADABLE_AGENT_TASK_MESSAGE: &str = "子 agent 的任务由主 agent 那家供应商加密，当前供应商解不开（主、子 agent 不在同一家）。可以在 CC Switch 设置 → 应用配置 → Codex 里打开「聚合模式下子 agent 用经典工具」后重启 Codex，或让子 agent 用和主 agent 同一家的模型。 (The sub-agent task was encrypted by the main agent's provider and this provider cannot read it. Turn on \"Classic sub-agent tools in aggregation\" under CC Switch Settings > App config > Codex and restart Codex, or give the sub-agent a model from the main agent's provider.)";
+const UNREADABLE_AGENT_TASK_MESSAGE: &str = "子 agent 的任务由主 agent 那家供应商加密，当前供应商解不开（主、子 agent 不在同一家）。请让子 agent 用和主 agent 同一家的模型。 (The sub-agent task was encrypted by the main agent's provider and this provider cannot read it. Give the sub-agent a model from the main agent's provider.)";
 
 /// 上游拒绝了请求里的密文，重试前要去掉哪些状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +47,7 @@ pub struct OpaqueStateRejection {
     /// 压缩条目换成文字（没有载荷的标记直接去掉）。压缩条目是整段早期对话的唯一载体：
     /// - 官方：只有错误明确点名压缩时才换。第三方回合的压缩由 CC Switch 包装、发送前已经
     ///   转成文字，到得了官方的压缩密文都是官方自己签发的。
-    /// - 第三方：一被拒就换。它收到的压缩密文多半是官方签发的（Stack 模式下切换过来）。
+    /// - 第三方：一被拒就换。它收到的压缩密文多半是官方签发的（从官方切换过来）。
     pub compaction: bool,
 }
 

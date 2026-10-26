@@ -268,9 +268,6 @@ pub struct RequestForwarder {
     /// `max_attempts = max_retries + 1`，所以 max_retries=0 表示仅尝试一家、
     /// max_retries=3（默认）表示最多 4 家。loop 同时受 providers.len() 自然限制。
     max_attempts: usize,
-    /// Stack 模型的请求（`mode::stack`）：挂在结构体上，整流器重试再次调用 `forward()` 时照样
-    /// 生效。见 [`Self::routing_state_enabled`]。
-    stack_request: bool,
 }
 
 impl RequestForwarder {
@@ -383,27 +380,7 @@ impl RequestForwarder {
                 streaming_first_byte_timeout,
             ),
             max_attempts,
-            stack_request: false,
         }
-    }
-
-    /// 标记为 Stack 模型的请求。
-    pub fn stack_request(mut self, stack_request: bool) -> Self {
-        self.stack_request = stack_request;
-        self
-    }
-
-    /// 这个请求读写路由状态吗：熔断器（许可、结果、健康度）、「正在使用」、代理统计
-    /// （总数、成功率、故障转移次数、最近错误、活跃连接）、故障转移切换。Stack 模型的请求
-    /// 和普通路由完全分开，一律不碰；只有用量日志照常按供应商记。以后新增路由状态也先问它。
-    fn routing_state_enabled(&self) -> bool {
-        !self.stack_request
-    }
-
-    /// 请求体里的模型名已经是这家的上游名（Stack 模型的请求）：不按角色映射、不换成行里配置
-    /// 的模型。以后新增模型改写也先问它。
-    fn keeps_resolved_model(&self) -> bool {
-        self.stack_request
     }
 
     async fn record_success_result(
@@ -493,9 +470,6 @@ impl RequestForwarder {
 
     /// 开始尝试一家：界面上显示正在尝试哪家。
     async fn note_attempt(&self, provider: &Provider) {
-        if !self.routing_state_enabled() {
-            return;
-        }
         let mut status = self.status.write().await;
         status.current_provider = Some(provider.name.clone());
         status.current_provider_id = Some(provider.id.clone());
@@ -523,10 +497,6 @@ impl RequestForwarder {
             outbound_model,
             connection_guard: None,
         };
-        if !self.routing_state_enabled() {
-            return result;
-        }
-
         // 普通闭合熔断状态异步记录，避免阻塞流式首包返回；
         // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
         self.record_success_result(&provider.id, app_type_str, used_half_open_permit)
@@ -571,9 +541,6 @@ impl RequestForwarder {
         error: &ProxyError,
         last_error: String,
     ) {
-        if !self.routing_state_enabled() {
-            return;
-        }
         let _ = self
             .router
             .record_result(
@@ -595,12 +562,10 @@ impl RequestForwarder {
         app_type_str: &str,
         used_half_open_permit: bool,
     ) -> ForwardError {
-        if self.routing_state_enabled() {
-            self.router
-                .release_permit_neutral(&provider.id, app_type_str, used_half_open_permit)
-                .await;
-            self.record_failed_request(error.to_string()).await;
-        }
+        self.router
+            .release_permit_neutral(&provider.id, app_type_str, used_half_open_permit)
+            .await;
+        self.record_failed_request(error.to_string()).await;
         ForwardError {
             error,
             provider: Some(Box::new(provider.clone())),
@@ -609,9 +574,6 @@ impl RequestForwarder {
 
     /// 这个客户端请求最终失败：失败数加一，记下错误，重算成功率。
     async fn record_failed_request(&self, last_error: String) {
-        if !self.routing_state_enabled() {
-            return;
-        }
         let mut status = self.status.write().await;
         status.failed_requests += 1;
         status.last_error = Some(last_error);
@@ -635,13 +597,6 @@ impl RequestForwarder {
         extensions: Extensions,
         providers: Vec<Provider>,
     ) -> Result<ForwardResult, ForwardError> {
-        if !self.routing_state_enabled() {
-            return self
-                .forward_with_retry_inner(
-                    app_type, method, endpoint, body, headers, extensions, providers,
-                )
-                .await;
-        }
         let guard = ActiveConnectionGuard::acquire(self.status.clone()).await;
         {
             let mut s = self.status.write().await;
@@ -703,8 +658,8 @@ impl RequestForwarder {
         let mut last_provider = None;
         let mut attempted_providers = 0usize;
 
-        // 单 Provider 场景下跳过熔断器检查（故障转移关闭时）；Stack 模型的请求不碰熔断器。
-        let bypass_circuit_breaker = providers.len() == 1 || !self.routing_state_enabled();
+        // 单 Provider 场景下跳过熔断器检查（故障转移关闭时）。
+        let bypass_circuit_breaker = providers.len() == 1;
 
         // 依次尝试每个供应商
         for provider in providers.iter() {
@@ -1296,7 +1251,6 @@ impl RequestForwarder {
             && super::providers::should_convert_codex_responses_to_anthropic(provider, endpoint);
         let codex_official_auth_passthrough = matches!(app_type, AppType::Codex)
             && super::providers::is_codex_official_provider(provider);
-        let codex_stack_request = self.stack_request && matches!(app_type, AppType::Codex);
 
         if codex_official_auth_passthrough {
             validate_codex_official_authorization(headers)?;
@@ -1308,8 +1262,6 @@ impl RequestForwarder {
         let mapped_body = if matches!(app_type, AppType::ClaudeDesktop) {
             crate::claude_desktop_config::map_proxy_request_model(body.clone(), provider)
                 .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?
-        } else if self.keeps_resolved_model() {
-            body.clone()
         } else {
             let (mapped_body, _original_model, _mapped_model) =
                 super::model_mapper::apply_model_mapping(body.clone(), provider);
@@ -1494,9 +1446,7 @@ impl RequestForwarder {
                     "[Codex] Restored or enriched {restored} cached function call item(s) for Chat upstream"
                 );
             }
-            if !self.keeps_resolved_model() {
-                super::providers::apply_codex_chat_upstream_model(provider, &mut mapped_body);
-            }
+            super::providers::apply_codex_chat_upstream_model(provider, &mut mapped_body);
             let reasoning_config =
                 super::providers::resolve_codex_chat_reasoning_config(provider, &mapped_body);
             let mut chat_body = super::providers::transform_codex_chat::responses_to_chat_completions_with_reasoning(
@@ -1513,9 +1463,7 @@ impl RequestForwarder {
             chat_body
         } else if codex_responses_to_anthropic {
             let mut mapped_body = mapped_body;
-            if !self.keeps_resolved_model() {
-                super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
-            }
+            super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
             // Per-provider output ceiling override. Codex does not forward its
             // `model_max_output_tokens` in the request body, so honor the value
             // configured on the provider here — it takes precedence over any
@@ -1644,38 +1592,13 @@ impl RequestForwarder {
                     provider.id
                 );
             }
-            // Stack 请求只做字段兼容。
-            let upstream_model = if self.keeps_resolved_model() {
-                None
-            } else {
-                super::providers::codex_provider_upstream_model(provider)
-            };
+            let upstream_model = super::providers::codex_provider_upstream_model(provider);
             super::providers::transform_codex_responses_xai_sanitize::apply_xai_native_responses_request_compat(
                 &mut request_body,
                 &provider.id,
                 upstream_model.as_deref(),
                 &provider.settings_config,
             );
-        }
-
-        // Stack 请求发往拒收托管 `web_search` 的原生 Responses 上游：去掉这个工具，和 Chat、
-        // Anthropic 转换丢掉托管工具是同一件事。只对 Stack 请求、只对名单上的上游生效；
-        // 路由请求和其他 Stack 请求逐字节不变。
-        if codex_stack_request && !codex_responses_to_chat && !codex_responses_to_anthropic {
-            let request_model = request_body
-                .get("model")
-                .and_then(|model| model.as_str())
-                .map(str::to_string);
-            if super::providers::codex_stack_upstream_rejects_web_search(
-                provider,
-                request_model.as_deref(),
-            ) && super::providers::strip_codex_hosted_web_search(&mut request_body)
-            {
-                log::debug!(
-                    "[Codex] Dropped hosted web_search for a stacked model (provider={})",
-                    provider.id
-                );
-            }
         }
 
         // Moonshot / Kimi Chat Completions reject `$ref` nodes that carry sibling
@@ -1943,14 +1866,7 @@ impl RequestForwarder {
             // can defeat strict gateway fingerprint checks.
             // The full set lives in `is_codex_client_fingerprint_header` so it stays in one
             // place. (HeaderName is lowercased by the http crate, so a direct match is safe.)
-            // Codex Stack 请求发往第三方时同样剥掉：官方做路由时 Codex 每个请求都带着 ChatGPT
-            // 身份（`chatgpt-account-id` 等），它们只能发往官方上游。Stack 目标不会是官方账号，
-            // 这里仍按上游判断，防止以后放宽。只限 Codex：Claude Code 自己的 `x-stainless-*`
-            // 是 Anthropic SDK 的正常请求头，Stack 请求照常转发。
-            if (codex_responses_to_anthropic
-                || (codex_stack_request && !codex_official_auth_passthrough))
-                && is_codex_client_fingerprint_header(key_str)
-            {
+            if codex_responses_to_anthropic && is_codex_client_fingerprint_header(key_str) {
                 continue;
             }
 
@@ -3793,7 +3709,6 @@ mod tests {
             non_streaming_timeout,
             streaming_first_byte_timeout,
             max_attempts: 1,
-            stack_request: false,
         }
     }
 
@@ -4315,7 +4230,7 @@ mod tests {
             "x-stainless-lang",
             "x-stainless-runtime",
             "x-codex-turn-id",
-            // ChatGPT 登录态下的身份头，Stack 请求发往第三方时同样不能带出去。
+            // ChatGPT 登录态下的身份头。
             "x-oai-attestation",
             "x-openai-fedramp",
             "x-openai-account-routing-override",
@@ -5137,7 +5052,6 @@ mod tests {
         assert!(fwd.media_retry_should_trigger("Claude", false, &body, &image_unsupported_error()));
     }
 
-    /// Codex Stack 请求的转发改写：身份头、模型名、托管 web_search。
     /// 在本机一个空闲端口上起假上游 `app`，返回它的地址。
     async fn serve_upstream(app: axum::Router) -> String {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -5148,902 +5062,6 @@ mod tests {
             axum::serve(listener, app).await.expect("serve upstream");
         });
         format!("http://{addr}")
-    }
-
-    mod codex_stack {
-        use super::*;
-        use tokio::sync::Mutex;
-
-        struct Seen {
-            headers: HeaderMap,
-            body: Value,
-        }
-
-        struct Upstream {
-            base_url: String,
-            seen: Arc<Mutex<Vec<Seen>>>,
-        }
-
-        /// 什么都回 200 的假上游，记下请求头和请求体。
-        async fn upstream() -> Upstream {
-            let seen = Arc::new(Mutex::new(Vec::new()));
-            let app = {
-                let seen = seen.clone();
-                axum::Router::new().fallback(move |headers: HeaderMap, body: Bytes| {
-                    let seen = seen.clone();
-                    async move {
-                        seen.lock().await.push(Seen {
-                            headers,
-                            body: serde_json::from_slice(&body).unwrap_or(Value::Null),
-                        });
-                        (
-                            StatusCode::OK,
-                            [(http::header::CONTENT_TYPE, "application/json")],
-                            json!({ "id": "r1", "object": "response", "output": [] }).to_string(),
-                        )
-                    }
-                })
-            };
-            Upstream {
-                base_url: serve_upstream(app).await,
-                seen,
-            }
-        }
-
-        /// 一家 Codex 第三方供应商：行里的模型是 `row-model`，目录里只有 `listed`。
-        fn provider(upstream: &Upstream, api_format: &str) -> Provider {
-            let mut provider = test_provider();
-            provider.id = format!("p-{api_format}");
-            provider.settings_config = json!({
-                "auth": { "OPENAI_API_KEY": "sk-third-party" },
-                "config": format!(
-                    "model_provider = \"custom\"\nmodel = \"row-model\"\n\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"{}/v1\"\nwire_api = \"responses\"\n",
-                    upstream.base_url
-                ),
-                "modelCatalog": { "models": [{ "model": "listed" }] },
-            });
-            provider.meta = Some(crate::provider::ProviderMeta {
-                api_format: Some(api_format.to_string()),
-                ..Default::default()
-            });
-            provider
-        }
-
-        fn forwarder(stack: bool) -> RequestForwarder {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-            test_forwarder(Duration::from_secs(5), Duration::from_secs(5)).stack_request(stack)
-        }
-
-        /// 官方做路由时 Codex 每个请求都带的 ChatGPT 身份。
-        fn chatgpt_headers() -> HeaderMap {
-            let mut headers = HeaderMap::new();
-            for (name, value) in [
-                ("content-type", "application/json"),
-                ("authorization", "Bearer chatgpt-access-token"),
-                ("chatgpt-account-id", "acct-workspace"),
-                ("originator", "codex_cli_rs"),
-                ("session_id", "session-1"),
-                ("x-codex-turn-state", "state"),
-                ("openai-beta", "responses=experimental"),
-                ("x-oai-attestation", "device-proof"),
-                ("x-openai-fedramp", "true"),
-            ] {
-                headers.insert(
-                    http::HeaderName::from_static(name),
-                    HeaderValue::from_static(value),
-                );
-            }
-            headers
-        }
-
-        fn body(model: &str, tools: Value) -> Value {
-            json!({
-                "model": model,
-                "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "hi" }] }],
-                "tools": tools,
-                "stream": false
-            })
-        }
-
-        async fn send(
-            forwarder: &RequestForwarder,
-            upstream: &Upstream,
-            provider: Provider,
-            endpoint: &str,
-            body: Value,
-        ) -> Seen {
-            forwarder
-                .forward_with_retry(
-                    &AppType::Codex,
-                    http::Method::POST,
-                    endpoint,
-                    body,
-                    chatgpt_headers(),
-                    Extensions::new(),
-                    vec![provider],
-                )
-                .await
-                .map_err(|error| error.error)
-                .expect("forward");
-            upstream.seen.lock().await.pop().expect("upstream request")
-        }
-
-        #[tokio::test]
-        async fn stacked_requests_never_carry_the_chatgpt_identity() {
-            let upstream = upstream().await;
-            for api_format in ["openai_responses", "openai_chat", "anthropic"] {
-                let seen = send(
-                    &forwarder(true),
-                    &upstream,
-                    provider(&upstream, api_format),
-                    "/responses",
-                    body("listed", json!([])),
-                )
-                .await;
-                for (name, _) in seen.headers.iter() {
-                    assert!(
-                        !is_codex_client_fingerprint_header(name.as_str()),
-                        "{api_format}: {name} reached a third party"
-                    );
-                }
-                let auth = seen
-                    .headers
-                    .get("authorization")
-                    .or_else(|| seen.headers.get("x-api-key"))
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap_or_default()
-                    .to_string();
-                assert!(auth.contains("sk-third-party"), "{api_format}: {auth}");
-                assert!(!auth.contains("chatgpt"), "{api_format}: {auth}");
-            }
-
-            // 对照：路由请求发往原生 Responses 时照旧转发这些头。
-            let seen = send(
-                &forwarder(false),
-                &upstream,
-                provider(&upstream, "openai_responses"),
-                "/responses",
-                body("listed", json!([])),
-            )
-            .await;
-            assert!(seen.headers.contains_key("session_id"));
-        }
-
-        /// 原生 Responses 第三方收不了 Codex 私有的压缩触发：改成禁止新工具调用的摘要回合
-        /// （工具定义保留，历史里的调用条目还引用着它们），CC Switch 包装的压缩摘要改成
-        /// 普通消息；看不出来源的压缩密文原样发出。
-        #[tokio::test]
-        async fn native_third_party_compaction_becomes_summary_turn() {
-            use crate::proxy::providers::codex_compaction::{
-                encode_compaction_summary, COMPACT_PROMPT, SUMMARY_PREFIX,
-            };
-            let upstream = upstream().await;
-            let mut request = body(
-                "listed",
-                json!([{ "type": "function", "name": "shell", "parameters": { "type": "object" } }]),
-            );
-            request["input"] = json!([
-                { "type": "compaction", "encrypted_content": "gAAAA-openai" },
-                { "type": "compaction", "encrypted_content": encode_compaction_summary("prior work") },
-                { "role": "user", "content": [{ "type": "input_text", "text": "hi" }] },
-                { "type": "compaction_trigger" }
-            ]);
-            let seen = send(
-                &forwarder(true),
-                &upstream,
-                provider(&upstream, "openai_responses"),
-                "/responses",
-                request,
-            )
-            .await;
-            assert_eq!(
-                seen.body["tools"],
-                json!([{ "type": "function", "name": "shell", "parameters": { "type": "object" } }])
-            );
-            assert_eq!(seen.body["tool_choice"], "none");
-            let input = seen.body["input"].as_array().unwrap();
-            assert_eq!(
-                input[0],
-                json!({ "type": "compaction", "encrypted_content": "gAAAA-openai" })
-            );
-            assert_eq!(
-                input[1]["content"][0]["text"],
-                format!("{SUMMARY_PREFIX}\nprior work")
-            );
-            assert!(input
-                .iter()
-                .all(|item| item["type"] != "compaction_trigger"));
-            assert_eq!(input.last().unwrap()["content"][0]["text"], COMPACT_PROMPT);
-
-            // 同一家上游自己签发的压缩密文：请求逐字节不改，不能把已压缩的历史换成占位文字。
-            let mut own_history = body("listed", json!([]));
-            own_history["input"] = json!([
-                { "type": "compaction", "id": "cmp_1", "encrypted_content": "gAAAA-issued-here" },
-                { "role": "user", "content": [{ "type": "input_text", "text": "go on" }] }
-            ]);
-            let seen = send(
-                &forwarder(false),
-                &upstream,
-                provider(&upstream, "openai_responses"),
-                "/responses",
-                own_history.clone(),
-            )
-            .await;
-            assert_eq!(seen.body["input"], own_history["input"]);
-
-            // 对照：普通请求逐字节不改。
-            let plain = body(
-                "listed",
-                json!([{ "type": "function", "name": "shell", "parameters": { "type": "object" } }]),
-            );
-            let seen = send(
-                &forwarder(true),
-                &upstream,
-                provider(&upstream, "openai_responses"),
-                "/responses",
-                plain.clone(),
-            )
-            .await;
-            assert_eq!(seen.body["tools"], plain["tools"]);
-            assert_eq!(seen.body["input"], plain["input"]);
-        }
-
-        /// 剥身份头只针对 Codex：Claude Code 的 Stack 请求照常带着 Anthropic SDK 的请求头。
-        #[tokio::test]
-        async fn claude_stacked_requests_keep_sdk_headers() {
-            let upstream = upstream().await;
-            let mut provider = test_provider();
-            provider.settings_config = json!({
-                "env": {
-                    "ANTHROPIC_BASE_URL": upstream.base_url,
-                    "ANTHROPIC_AUTH_TOKEN": "sk-third-party",
-                }
-            });
-            let mut headers = HeaderMap::new();
-            for (name, value) in [
-                ("content-type", "application/json"),
-                ("x-stainless-lang", "js"),
-                ("x-stainless-package-version", "0.60.0"),
-            ] {
-                headers.insert(
-                    http::HeaderName::from_static(name),
-                    HeaderValue::from_static(value),
-                );
-            }
-            forwarder(true)
-                .forward_with_retry(
-                    &AppType::Claude,
-                    http::Method::POST,
-                    "/v1/messages",
-                    json!({
-                        "model": "stacked-model",
-                        "max_tokens": 16,
-                        "messages": [{ "role": "user", "content": "hi" }]
-                    }),
-                    headers,
-                    Extensions::new(),
-                    vec![provider],
-                )
-                .await
-                .map_err(|error| error.error)
-                .expect("forward");
-            let seen = upstream.seen.lock().await.pop().expect("upstream request");
-            assert_eq!(seen.headers["x-stainless-lang"], "js");
-            assert_eq!(seen.headers["x-stainless-package-version"], "0.60.0");
-            assert_eq!(seen.body["model"], "stacked-model");
-        }
-
-        #[tokio::test]
-        async fn stacked_requests_are_not_rewritten_to_the_rows_model() {
-            let upstream = upstream().await;
-            for api_format in ["openai_responses", "openai_chat", "anthropic"] {
-                let seen = send(
-                    &forwarder(true),
-                    &upstream,
-                    provider(&upstream, api_format),
-                    "/responses",
-                    body("not-listed", json!([])),
-                )
-                .await;
-                assert_eq!(seen.body["model"], "not-listed", "{api_format}");
-            }
-
-            // 对照：路由请求发往 Chat 转换时，目录外的模型换成行里的模型。
-            let seen = send(
-                &forwarder(false),
-                &upstream,
-                provider(&upstream, "openai_chat"),
-                "/responses",
-                body("not-listed", json!([])),
-            )
-            .await;
-            assert_eq!(seen.body["model"], "row-model");
-        }
-
-        #[tokio::test]
-        async fn stacked_requests_drop_hosted_web_search_only_where_it_is_rejected() {
-            let upstream = upstream().await;
-            let function = json!({ "type": "function", "name": "shell", "parameters": {} });
-            let tools = json!([function.clone(), { "type": "web_search" }]);
-            let with_choice = |model: &str| {
-                let mut body = body(model, tools.clone());
-                body["tool_choice"] = json!({ "type": "web_search" });
-                body
-            };
-
-            // GLM 的原生 Responses 网关不认托管 web_search：去掉工具和指向它的 tool_choice。
-            for endpoint in ["/responses", "/responses/compact"] {
-                let seen = send(
-                    &forwarder(true),
-                    &upstream,
-                    provider(&upstream, "openai_responses"),
-                    endpoint,
-                    with_choice("glm-5.2"),
-                )
-                .await;
-                assert_eq!(seen.body["tools"], json!([function.clone()]), "{endpoint}");
-                assert!(seen.body.get("tool_choice").is_none(), "{endpoint}");
-            }
-
-            // 只剩它一个工具时整个 `tools` 删掉。
-            let seen = send(
-                &forwarder(true),
-                &upstream,
-                provider(&upstream, "openai_responses"),
-                "/responses",
-                body("glm-5.2", json!([{ "type": "web_search" }])),
-            )
-            .await;
-            assert!(seen.body.get("tools").is_none(), "{}", seen.body);
-
-            // 对照：支持的上游、路由请求都原样转发。
-            for (stack, model) in [(true, "deepseek-v4-pro"), (false, "glm-5.2")] {
-                let seen = send(
-                    &forwarder(stack),
-                    &upstream,
-                    provider(&upstream, "openai_responses"),
-                    "/responses",
-                    with_choice(model),
-                )
-                .await;
-                assert_eq!(seen.body["tools"], tools, "stack={stack} {model}");
-                assert_eq!(seen.body["tool_choice"]["type"], "web_search");
-            }
-        }
-
-        /// 按脚本依次回应的假上游，记下请求头和请求体。
-        async fn scripted_upstream(script: Vec<(u16, Value)>) -> Upstream {
-            let script = Arc::new(Mutex::new(std::collections::VecDeque::from(script)));
-            let seen = Arc::new(Mutex::new(Vec::new()));
-            let app = {
-                let seen = seen.clone();
-                axum::Router::new().fallback(move |headers: HeaderMap, body: Bytes| {
-                    let script = script.clone();
-                    let seen = seen.clone();
-                    async move {
-                        seen.lock().await.push(Seen {
-                            headers,
-                            body: serde_json::from_slice(&body).unwrap_or(Value::Null),
-                        });
-                        let (status, body) = script
-                            .lock()
-                            .await
-                            .pop_front()
-                            .expect("upstream script exhausted");
-                        (
-                            StatusCode::from_u16(status).expect("status"),
-                            [(http::header::CONTENT_TYPE, "application/json")],
-                            body.to_string(),
-                        )
-                    }
-                })
-            };
-            Upstream {
-                base_url: serve_upstream(app).await,
-                seen,
-            }
-        }
-
-        fn blob_rejection() -> (u16, Value) {
-            (
-                400,
-                json!({ "error": {
-                    "type": "invalid_request_error",
-                    "code": "invalid_encrypted_content",
-                    "message": "The encrypted content could not be verified."
-                } }),
-            )
-        }
-
-        fn response_ok() -> (u16, Value) {
-            (
-                200,
-                json!({ "id": "r1", "object": "response", "output": [] }),
-            )
-        }
-
-        /// 上一轮是别家原生 Responses 上游，历史里留着它签发的推理密文。
-        fn history_with_foreign_reasoning() -> Value {
-            let mut request = body("listed", json!([]));
-            request["input"] = json!([
-                { "role": "user", "content": [{ "type": "input_text", "text": "hi" }] },
-                { "type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "gAAAA-other-org" },
-                { "type": "message", "id": "msg_1", "role": "assistant",
-                  "content": [{ "type": "output_text", "text": "a" }] },
-                { "role": "user", "content": [{ "type": "input_text", "text": "again" }] }
-            ]);
-            request
-        }
-
-        async fn forward_codex(
-            forwarder: &RequestForwarder,
-            provider: Provider,
-        ) -> Result<ForwardResult, ForwardError> {
-            forwarder
-                .forward_with_retry(
-                    &AppType::Codex,
-                    http::Method::POST,
-                    "/responses",
-                    history_with_foreign_reasoning(),
-                    chatgpt_headers(),
-                    Extensions::new(),
-                    vec![provider],
-                )
-                .await
-        }
-
-        fn carries_reasoning(seen: &Seen) -> bool {
-            seen.body["input"]
-                .as_array()
-                .is_some_and(|input| input.iter().any(|item| item["type"] == "reasoning"))
-        }
-
-        /// 上游明确说验不了别家签发的密文：去掉推理条目，对同一家只重试一次。
-        #[tokio::test]
-        async fn foreign_blob_rejection_is_retried_once_without_reasoning() {
-            for stack in [true, false] {
-                let upstream = scripted_upstream(vec![blob_rejection(), response_ok()]).await;
-                let result =
-                    forward_codex(&forwarder(stack), provider(&upstream, "openai_responses")).await;
-                assert!(result.is_ok(), "stack={stack}");
-                let seen = upstream.seen.lock().await;
-                assert_eq!(seen.len(), 2, "stack={stack}");
-                assert!(carries_reasoning(&seen[0]));
-                assert!(!carries_reasoning(&seen[1]));
-                assert_eq!(seen[1].body["input"].as_array().unwrap().len(), 3);
-            }
-
-            // 重试仍被拒：不再重试，把第二次的错误交回客户端。
-            let upstream = scripted_upstream(vec![blob_rejection(), blob_rejection()]).await;
-            let error = forward_codex(&forwarder(true), provider(&upstream, "openai_responses"))
-                .await
-                .err()
-                .expect("still rejected");
-            assert!(matches!(
-                error.error,
-                ProxyError::UpstreamError { status: 400, .. }
-            ));
-            assert_eq!(upstream.seen.lock().await.len(), 2);
-        }
-
-        /// Stack 模式下官方压缩过、再切到别家原生 Responses 模型：官方的压缩密文原样发出，
-        /// 那家网关不认识、报错措辞又不在清单里时，只换掉压缩条目对同一家重试一次，
-        /// 这家自己的推理条目照旧发。
-        #[tokio::test]
-        async fn unrecognized_compaction_is_replaced_after_a_native_third_party_rejects_it() {
-            use crate::proxy::providers::codex_compaction::OPAQUE_COMPACTION_NOTE;
-            let unsupported = (
-                400,
-                json!({ "error": { "message": "unsupported input item type: compaction" } }),
-            );
-            let upstream = scripted_upstream(vec![unsupported, response_ok()]).await;
-            let mut request = history_with_foreign_reasoning();
-            request["input"].as_array_mut().unwrap().insert(
-                0,
-                json!({ "type": "compaction", "encrypted_content": "gAAAA-openai" }),
-            );
-            forwarder(true)
-                .forward_with_retry(
-                    &AppType::Codex,
-                    http::Method::POST,
-                    "/responses",
-                    request,
-                    chatgpt_headers(),
-                    Extensions::new(),
-                    vec![provider(&upstream, "openai_responses")],
-                )
-                .await
-                .map_err(|error| error.error)
-                .expect("retried");
-
-            let seen = upstream.seen.lock().await;
-            assert_eq!(seen.len(), 2);
-            assert_eq!(seen[0].body["input"][0]["type"], "compaction");
-            let retried = seen[1].body["input"].as_array().unwrap();
-            assert_eq!(retried.len(), 5);
-            assert_eq!(retried[0]["content"][0]["text"], OPAQUE_COMPACTION_NOTE);
-            assert!(carries_reasoning(&seen[1]));
-        }
-
-        /// 措辞不在清单里的兜底只给 Codex 的原生 Responses 第三方：官方的压缩密文只在错误
-        /// 点名时才换，Grok Build 的压缩密文是 xAI 自己的。
-        #[tokio::test]
-        async fn generic_compaction_retry_is_limited_to_codex_third_parties() {
-            let upstream = upstream().await;
-            let third_party = provider(&upstream, "openai_responses");
-            let mut official = third_party.clone();
-            official.id = crate::database::CODEX_OFFICIAL_PROVIDER_ID.to_string();
-            official.category = Some("official".to_string());
-            let request = json!({ "input": [
-                { "type": "compaction", "encrypted_content": "gAAAA-openai" }
-            ] });
-            let unsupported = ProxyError::UpstreamError {
-                status: 400,
-                body: Some("unsupported input item".to_string()),
-            };
-            let forwarder = forwarder(false);
-            let gate = |app_type: AppType, provider: &Provider| {
-                forwarder.opaque_state_retry_rejection(
-                    &app_type,
-                    provider,
-                    Some(CodexUpstreamFormat::NativeResponses),
-                    false,
-                    &request,
-                    &unsupported,
-                )
-            };
-
-            assert_eq!(
-                gate(AppType::Codex, &third_party),
-                Some(OpaqueStateRejection {
-                    reasoning: false,
-                    compaction: true
-                })
-            );
-            assert_eq!(gate(AppType::Codex, &official), None);
-            assert_eq!(gate(AppType::GrokBuild, &third_party), None);
-        }
-
-        #[test]
-        fn opaque_retry_uses_actual_transport_not_legacy_static_format() {
-            let forwarder = forwarder(false);
-            let provider = provider(
-                &Upstream {
-                    base_url: "https://relay.example/v1".to_string(),
-                    seen: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-                },
-                "openai_chat",
-            );
-            let request = json!({ "input": [
-                { "type": "compaction", "encrypted_content": "gAAAA-openai" }
-            ] });
-            let unsupported = ProxyError::UpstreamError {
-                status: 400,
-                body: Some("unsupported input item".to_string()),
-            };
-
-            assert_eq!(
-                forwarder.opaque_state_retry_rejection(
-                    &AppType::Codex,
-                    &provider,
-                    Some(CodexUpstreamFormat::NativeResponses),
-                    false,
-                    &request,
-                    &unsupported,
-                ),
-                Some(OpaqueStateRejection {
-                    reasoning: false,
-                    compaction: true,
-                })
-            );
-            assert_eq!(
-                forwarder.opaque_state_retry_rejection(
-                    &AppType::Codex,
-                    &provider,
-                    Some(CodexUpstreamFormat::ChatCompletions),
-                    false,
-                    &request,
-                    &unsupported,
-                ),
-                None
-            );
-        }
-
-        /// 其他 400、转换成 Chat 的上游都不触发。
-        #[tokio::test]
-        async fn blob_retry_only_follows_self_identified_rejections_on_native_upstreams() {
-            let unrelated = (
-                400,
-                json!({ "error": { "type": "invalid_request_error", "message": "Invalid value for 'model'." } }),
-            );
-            let upstream = scripted_upstream(vec![unrelated]).await;
-            assert!(
-                forward_codex(&forwarder(true), provider(&upstream, "openai_responses"))
-                    .await
-                    .is_err()
-            );
-            assert_eq!(upstream.seen.lock().await.len(), 1);
-
-            let upstream = scripted_upstream(vec![blob_rejection()]).await;
-            assert!(
-                forward_codex(&forwarder(true), provider(&upstream, "openai_chat"))
-                    .await
-                    .is_err()
-            );
-            assert_eq!(upstream.seen.lock().await.len(), 1);
-        }
-
-        /// 按脚本依次回应的假上游，每一步自己定 content-type 和原始响应体（流式用）。
-        async fn raw_upstream(script: Vec<(u16, &'static str, String)>) -> Upstream {
-            let script = Arc::new(Mutex::new(std::collections::VecDeque::from(script)));
-            let seen = Arc::new(Mutex::new(Vec::new()));
-            let app = {
-                let seen = seen.clone();
-                axum::Router::new().fallback(move |headers: HeaderMap, body: Bytes| {
-                    let script = script.clone();
-                    let seen = seen.clone();
-                    async move {
-                        seen.lock().await.push(Seen {
-                            headers,
-                            body: serde_json::from_slice(&body).unwrap_or(Value::Null),
-                        });
-                        let (status, content_type, body) = script
-                            .lock()
-                            .await
-                            .pop_front()
-                            .expect("upstream script exhausted");
-                        (
-                            StatusCode::from_u16(status).expect("status"),
-                            [(http::header::CONTENT_TYPE, content_type)],
-                            body,
-                        )
-                    }
-                })
-            };
-            Upstream {
-                base_url: serve_upstream(app).await,
-                seen,
-            }
-        }
-
-        const ENCRYPTED_TASK_REJECTION: &str =
-            "Encrypted function output content could not be decrypted or decoded.";
-
-        fn sse(events: &[Value]) -> (u16, &'static str, String) {
-            let body = events
-                .iter()
-                .map(|event| {
-                    format!(
-                        "event: {}\ndata: {event}\n\n",
-                        event["type"].as_str().unwrap()
-                    )
-                })
-                .collect::<String>();
-            (200, "text/event-stream", body)
-        }
-
-        fn failed_stream(message: &str) -> (u16, &'static str, String) {
-            sse(&[
-                json!({ "type": "response.created", "response": { "id": "r1", "status": "in_progress" } }),
-                json!({ "type": "response.failed", "response": { "id": "r1", "status": "failed",
-                         "error": { "code": "server_error", "message": message } } }),
-            ])
-        }
-
-        fn completed_stream() -> (u16, &'static str, String) {
-            sse(&[
-                json!({ "type": "response.created", "response": { "id": "r1", "status": "in_progress" } }),
-                json!({ "type": "response.output_item.added", "output_index": 0,
-                         "item": { "type": "message", "id": "msg_1", "role": "assistant", "content": [] } }),
-                json!({ "type": "response.completed", "response": { "id": "r1", "status": "completed", "output": [] } }),
-            ])
-        }
-
-        /// 子 agent 的第一个请求：末尾是主 agent 那家签发的任务密文。`history` 放在它前面。
-        fn sub_agent_request(history: Vec<Value>) -> Value {
-            let mut input = history;
-            input.push(json!({
-                "type": "agent_message",
-                "author": "/root",
-                "recipient": "/root/worker",
-                "content": [
-                    { "type": "input_text", "text": "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n" },
-                    { "type": "encrypted_content", "encrypted_content": "gAAAAB-task-from-main" }
-                ]
-            }));
-            json!({ "model": "listed", "input": input, "stream": true })
-        }
-
-        async fn forward_sub_agent(
-            upstream: &Upstream,
-            request: Value,
-        ) -> Result<ForwardResult, ForwardError> {
-            forwarder(true)
-                .forward_with_retry(
-                    &AppType::Codex,
-                    http::Method::POST,
-                    "/responses",
-                    request,
-                    chatgpt_headers(),
-                    Extensions::new(),
-                    vec![provider(upstream, "openai_responses")],
-                )
-                .await
-        }
-
-        async fn body_text(result: ForwardResult) -> String {
-            let chunks: Vec<_> = result.response.bytes_stream().collect().await;
-            let bytes: Vec<u8> = chunks
-                .into_iter()
-                .flat_map(|chunk| chunk.expect("chunk").to_vec())
-                .collect();
-            String::from_utf8(bytes).expect("utf8")
-        }
-
-        fn is_unreadable_task_error(error: &ProxyError) -> bool {
-            let ProxyError::UpstreamError {
-                status: 400,
-                body: Some(body),
-            } = error
-            else {
-                return false;
-            };
-            serde_json::from_str::<Value>(body)
-                .is_ok_and(|body| body["error"]["code"] == "unreadable_encrypted_agent_task")
-        }
-
-        fn task_ciphertext(seen: &Seen) -> &Value {
-            &seen.body["input"].as_array().unwrap().last().unwrap()["content"][1]
-                ["encrypted_content"]
-        }
-
-        /// 子 agent 换了一家：上游在流里、输出之前说解不开。不把空任务交给子 agent，也不让
-        /// Codex 对着同一个错重试，直接说明原因。
-        #[tokio::test]
-        async fn sub_agent_task_rejected_in_stream_returns_an_explanation() {
-            let upstream = raw_upstream(vec![failed_stream(ENCRYPTED_TASK_REJECTION)]).await;
-            let error = forward_sub_agent(&upstream, sub_agent_request(Vec::new()))
-                .await
-                .err()
-                .expect("rejected");
-            assert!(is_unreadable_task_error(&error.error), "{:?}", error.error);
-            // 请求里没有别家的历史状态可去：只发一次。
-            assert_eq!(upstream.seen.lock().await.len(), 1);
-        }
-
-        /// 历史里也有别家的状态时，先去掉历史里的、任务原样保留重试一次；还被拒才说明原因。
-        #[tokio::test]
-        async fn sub_agent_retry_strips_history_but_keeps_the_task() {
-            let history = vec![
-                json!({ "type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "gAAAA-other-org" }),
-                json!({ "type": "agent_message", "author": "/root", "recipient": "/root/worker",
-                         "content": [{ "type": "encrypted_content", "encrypted_content": "gAAAA-older-task" }] }),
-            ];
-            let upstream = raw_upstream(vec![
-                failed_stream(ENCRYPTED_TASK_REJECTION),
-                failed_stream(ENCRYPTED_TASK_REJECTION),
-            ])
-            .await;
-            let error = forward_sub_agent(&upstream, sub_agent_request(history.clone()))
-                .await
-                .err()
-                .expect("rejected");
-            assert!(is_unreadable_task_error(&error.error), "{:?}", error.error);
-            let seen = upstream.seen.lock().await;
-            assert_eq!(seen.len(), 2);
-            assert!(carries_reasoning(&seen[0]));
-            assert!(!carries_reasoning(&seen[1]));
-            assert_eq!(seen[1].body["input"][0]["content"][0]["type"], "input_text");
-            assert_eq!(task_ciphertext(&seen[1]), "gAAAAB-task-from-main");
-            drop(seen);
-
-            // 历史里的状态才是问题：重试成功，任务照样原样到达上游。
-            let upstream = raw_upstream(vec![
-                failed_stream(ENCRYPTED_TASK_REJECTION),
-                completed_stream(),
-            ])
-            .await;
-            assert!(forward_sub_agent(&upstream, sub_agent_request(history))
-                .await
-                .is_ok());
-            let seen = upstream.seen.lock().await;
-            assert_eq!(seen.len(), 2);
-            assert_eq!(task_ciphertext(&seen[1]), "gAAAAB-task-from-main");
-        }
-
-        /// HTTP 报错同样处理。
-        #[tokio::test]
-        async fn sub_agent_task_rejected_over_http_returns_an_explanation() {
-            let rejection = json!({ "error": { "message": ENCRYPTED_TASK_REJECTION } }).to_string();
-            let upstream = raw_upstream(vec![(502, "application/json", rejection)]).await;
-            let error = forward_sub_agent(&upstream, sub_agent_request(Vec::new()))
-                .await
-                .err()
-                .expect("rejected");
-            assert!(is_unreadable_task_error(&error.error), "{:?}", error.error);
-            assert_eq!(upstream.seen.lock().await.len(), 1);
-        }
-
-        /// 缓冲阶段只有一个截止时间：上游在输出前一直发心跳，也不能无限期压着流不交给客户端。
-        #[tokio::test]
-        async fn sub_agent_hold_has_one_deadline_despite_heartbeats() {
-            const HEARTBEATS: u32 = 40;
-            let created = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\n";
-            let completed = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[]}}\n\n";
-            let app = axum::Router::new().fallback(move || async move {
-                let stream = futures::stream::unfold(0u32, move |n| async move {
-                    if n > HEARTBEATS {
-                        return None;
-                    }
-                    if n > 0 {
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
-                    let chunk = match n {
-                        0 => created,
-                        HEARTBEATS => completed,
-                        _ => ": keepalive\n\n",
-                    };
-                    Some((
-                        Ok::<_, std::io::Error>(Bytes::from_static(chunk.as_bytes())),
-                        n + 1,
-                    ))
-                });
-                (
-                    [(http::header::CONTENT_TYPE, "text/event-stream")],
-                    axum::body::Body::from_stream(stream),
-                )
-            });
-            let upstream = Upstream {
-                base_url: serve_upstream(app).await,
-                seen: Arc::new(Mutex::new(Vec::new())),
-            };
-            let _ = rustls::crypto::ring::default_provider().install_default();
-            let forwarder = test_forwarder(Duration::from_secs(5), Duration::from_millis(100))
-                .stack_request(true);
-
-            let started = std::time::Instant::now();
-            let result = forwarder
-                .forward_with_retry(
-                    &AppType::Codex,
-                    http::Method::POST,
-                    "/responses",
-                    sub_agent_request(Vec::new()),
-                    chatgpt_headers(),
-                    Extensions::new(),
-                    vec![provider(&upstream, "openai_responses")],
-                )
-                .await
-                .map_err(|error| error.error)
-                .expect("committed");
-            let handed_over = started.elapsed();
-            // 心跳要发 800ms；截止时间 100ms，交出流不该等到心跳发完。
-            assert!(
-                handed_over < Duration::from_millis(500),
-                "held for {handed_over:?}"
-            );
-            let text = body_text(result).await;
-            assert!(text.starts_with(created), "{text}");
-            assert!(text.ends_with(completed), "{text}");
-            assert_eq!(
-                text.matches(": keepalive").count(),
-                (HEARTBEATS - 1) as usize
-            );
-        }
-
-        /// 上游解得开（同一家）或者是别的失败：客户端收到的流和上游发的逐字节一样。
-        #[tokio::test]
-        async fn sub_agent_streams_pass_through_unchanged_otherwise() {
-            for step in [completed_stream(), failed_stream("backend exploded")] {
-                let expected = step.2.clone();
-                let upstream = raw_upstream(vec![step]).await;
-                let result = forward_sub_agent(&upstream, sub_agent_request(Vec::new()))
-                    .await
-                    .map_err(|error| error.error)
-                    .expect("committed");
-                assert_eq!(body_text(result).await, expected);
-                assert_eq!(upstream.seen.lock().await.len(), 1);
-            }
-        }
     }
 
     /// 一次请求结束后留下的记账：代理统计、「正在使用」、熔断器。每条出口路径各断言一次，
@@ -6625,105 +5643,6 @@ mod tests {
             assert!(requests[1]
                 .to_string()
                 .contains(crate::proxy::media_sanitizer::UNSUPPORTED_IMAGE_MARKER));
-        }
-
-        // ---- Stack 模型：不读也不写任何路由状态 ----
-
-        fn untouched() -> Books {
-            Books {
-                total: 0,
-                success: 0,
-                failed: 0,
-                success_rate: 0.0,
-                failover_count: 0,
-                last_error: None,
-                attempting: None,
-                in_use: None,
-            }
-        }
-
-        /// 熔断器从没为这家建过记录（成功是异步记的，给它时间落下）。
-        async fn breaker_untouched(forwarder: &RequestForwarder, provider_id: &str) -> bool {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            forwarder
-                .router
-                .get_circuit_breaker_stats(provider_id, "claude")
-                .await
-                .is_none()
-        }
-
-        fn stack_forwarder() -> RequestForwarder {
-            // 请求开始时的「当前供应商」是别家：普通请求成功后会记一次故障转移并切路由。
-            forwarder(4, "route").stack_request(true)
-        }
-
-        #[tokio::test]
-        async fn stacked_requests_leave_every_routing_state_alone() {
-            for script in [
-                vec![ok()],
-                vec![error(503, "overloaded")],
-                vec![error(400, "bad request")],
-            ] {
-                let status = script[0].0;
-                let up = upstream(script).await;
-                let fwd = stack_forwarder();
-
-                let result = send(&fwd, vec![provider("kimi", &up)], plain_body()).await;
-
-                assert_eq!(result.is_ok(), status == 200, "{status}");
-                if let Ok(result) = &result {
-                    assert!(result.connection_guard.is_none(), "no active connection");
-                }
-                assert_eq!(books(&fwd).await, untouched(), "{status}");
-                assert_eq!(fwd.status.read().await.active_connections, 0);
-                assert!(breaker_untouched(&fwd, "kimi").await, "{status}");
-                assert_eq!(up.requests.lock().await.len(), 1, "{status}");
-            }
-        }
-
-        #[tokio::test]
-        async fn stacked_requests_keep_their_model() {
-            let up = upstream(vec![ok(), ok()]).await;
-            let mut kimi = provider("kimi", &up);
-            kimi.settings_config["env"]["ANTHROPIC_MODEL"] = json!("kimi-k2");
-            let mut body = plain_body();
-            body["model"] = json!("kimi-k3");
-
-            // 对照：普通请求按角色映射成行里配置的模型。
-            send(&forwarder(1, "kimi"), vec![kimi.clone()], body.clone())
-                .await
-                .map_err(|e| e.error)
-                .expect("routed");
-            send(&stack_forwarder(), vec![kimi], body)
-                .await
-                .map_err(|e| e.error)
-                .expect("stack mode");
-
-            let requests = up.requests.lock().await;
-            assert_eq!(requests[0]["model"], "kimi-k2");
-            assert_eq!(requests[1]["model"], "kimi-k3");
-        }
-
-        #[tokio::test]
-        async fn stacked_requests_stay_stacked_through_rectifier_retries() {
-            let up = upstream(vec![error(400, SIGNATURE_ERROR), ok()]).await;
-            let mut kimi = provider("kimi", &up);
-            kimi.settings_config["env"]["ANTHROPIC_MODEL"] = json!("kimi-k2");
-            let mut body = body_with_thinking_signature();
-            body["model"] = json!("kimi-k3");
-            let fwd = stack_forwarder();
-
-            send(&fwd, vec![kimi], body)
-                .await
-                .map_err(|e| e.error)
-                .expect("retried");
-
-            let requests = up.requests.lock().await;
-            assert_eq!(requests.len(), 2);
-            assert_eq!(requests[1]["model"], "kimi-k3");
-            assert!(!requests[1].to_string().contains("\"signature\""));
-            assert_eq!(books(&fwd).await, untouched());
-            assert!(breaker_untouched(&fwd, "kimi").await);
         }
     }
 }

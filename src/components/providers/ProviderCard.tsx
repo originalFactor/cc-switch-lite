@@ -53,7 +53,6 @@ interface ProviderCardProps {
 const TONE_CLASS: Record<CardTone, string> = {
   direct: "border-direct-border bg-direct-soft",
   route: "border-route-border bg-route-soft",
-  stack: "border-stack-border bg-stack-soft",
   neutral: "border-border-strong bg-subtle",
 };
 
@@ -61,7 +60,6 @@ const CHIP_CLASS: Record<CardChip["tone"], string> = {
   outline: "border border-border-strong text-fg-2",
   direct: "bg-direct-soft text-direct-text",
   route: "bg-route-soft text-route-text",
-  stack: "bg-stack-soft text-stack-text",
   success: "bg-success-soft text-success-text",
   warning: "bg-warning-soft text-warning-text",
   danger: "bg-danger-soft text-danger-text",

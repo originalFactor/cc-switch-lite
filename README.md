@@ -23,7 +23,7 @@ AI coding tools like Claude Code, Codex, and Gemini CLI each have their own conf
 
 - **One App, Five Tools** — Claude Code, Claude Desktop, Codex, Gemini CLI, and Grok Build
 - **No More Manual Editing** — Universal provider form: enter endpoint and key once; search models by name and domain, and the form knows providers like AWS Bedrock, NVIDIA NIM, and community relays
-- **Direct, Routing, or Aggregation — Your Choice** — Direct connects the tool straight to the provider; Routing forwards requests through your machine, converting API formats and failing over automatically, so you can use GPT in Claude Code and Claude in Codex; Aggregation puts models from several providers into one model list in Claude Code or Codex, and each request goes to the provider of the model you pick
+- **Direct or Routing — Your Choice** — Direct connects the tool straight to the provider; Routing forwards requests through your machine, converting API formats and failing over automatically, so you can use GPT in Claude Code and Claude in Codex. One switch in the app page header flips between the two and keeps the same provider
 - **Centralized MCP, Skills & Prompts** — Add MCP servers and Skills once, then choose which tools to sync them to; prompts are maintained separately for each tool
 - **Sessions You Can Read** — Turns each tool's session logs into a reading view: what each turn did, which files changed, and which step failed, all at a glance
 - **Usage & Quotas at a Glance** — Track token usage and spending even without local routing; remaining subscription quota and account balances show right on provider cards and in the tray
@@ -87,7 +87,7 @@ Download the latest Linux build from the [Releases](../../releases) page:
    - System Tray: One row per tool showing "name · mode · provider · quota"; click a provider name in its submenu to switch (Claude Code, Claude Desktop, Codex, Gemini CLI, and Grok Build)
 3. **Takes Effect**: Claude Code needs no restart; for Codex, Gemini CLI, and Grok Build, restart your terminal or the CLI tool; for Claude Desktop, restart the app itself (see FAQ)
 4. **Back to Official Login**: Switch to the built-in official provider in the list (e.g. "Claude Official"), restart the tool, then follow its login/OAuth flow
-5. **Routing & Aggregation (optional)**: The Claude Code, Codex, Gemini CLI, and Grok Build pages have "Direct" / "Routing" tabs at the top, and Claude Code and Codex also have "Aggregation". Clicking a tab only changes what you're looking at and doesn't touch your configuration; to actually switch, click "Start routing" or "Switch to Aggregation" on the page, and click "Back to direct" to return. Use Routing to use OpenAI- or Gemini-format providers in Claude Code, or Claude in Codex; use Aggregation to mix models from several providers in one model list
+5. **Routing (optional)**: The Claude Code, Codex, Gemini CLI, and Grok Build pages have one routing switch in the header. Turn it on to send the current provider's requests through local routing, turn it off to go back to direct with the same provider. Use Routing to use OpenAI- or Gemini-format providers in Claude Code, or Claude in Codex
 6. **Manage Tools**: The "Apps" page in the sidebar shows each AI coding tool's version, install location, and source in one place; you can install, upgrade, upgrade all, or uninstall (and pick which duplicate to remove when a tool is installed in several places), and choose which tools appear in the sidebar
 
 ### MCP, Prompts, Skills, Projects & Sessions
@@ -104,17 +104,16 @@ Download the latest Linux build from the [Releases](../../releases) page:
 
 ### Supported Features by Tool
 
-| Tool | Providers | Local Routing | Aggregation | Tray Switching | MCP | Skills | Prompts | Sessions | Usage Stats |
-| --- | --- | :---: | :---: | :---: | :---: | :---: | --- | :---: | :---: |
-| Claude Code | Switch | ✓ | ✓ | ✓ | ✓ | ✓ | CLAUDE.md | ✓ | ✓ |
-| Claude Desktop | Switch | Model Mapping only | – | ✓ | – | – | – | – | Model Mapping only |
-| Codex | Switch | ✓ | ✓ | ✓ | ✓ | ✓ | AGENTS.md | ✓ | ✓ |
-| Gemini CLI | Switch | ✓ | – | ✓ | ✓ | ✓ | GEMINI.md | ✓ | ✓ |
-| Grok Build | Switch | ✓ | – | ✓ | ✓ | ✓ | AGENTS.md | ✓ | ✓ |
+| Tool | Providers | Local Routing | Tray Switching | MCP | Skills | Prompts | Sessions | Usage Stats |
+| --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Claude Code | Switch | ✓ | ✓ | ✓ | ✓ | CLAUDE.md | ✓ | ✓ |
+| Claude Desktop | Switch | Model Mapping only | ✓ | – | – | – | – | Model Mapping only |
+| Codex | Switch | ✓ | ✓ | ✓ | ✓ | AGENTS.md | ✓ | ✓ |
+| Gemini CLI | Switch | ✓ | ✓ | ✓ | ✓ | GEMINI.md | ✓ | ✓ |
+| Grok Build | Switch | ✓ | ✓ | ✓ | ✓ | AGENTS.md | ✓ | ✓ |
 
 - **Switch**: only one provider is active at a time.
 - **Local Routing**: CC Switch forwards requests on your machine and converts API formats; see [Local Routing & Failover](#local-routing--failover) below. Claude Desktop providers can use "Direct" or "Model Mapping"; with "Model Mapping", requests go through local routing.
-- **Aggregation**: Puts models from several providers into one model list and sends each request to the provider of the model you pick; see [Aggregation Mode](#aggregation-mode) below.
 - **Sessions**: Browse and search conversation history, open the reading view, and copy a resume command to continue a conversation.
 - **Usage Stats**: Without local routing, usage is collected from each tool's local session logs; requests that go through local routing are counted as well.
 - The MCP, Skills, Prompts, and Sessions panels opened from the Claude Desktop page apply to Claude Code.
@@ -131,18 +130,11 @@ Download the latest Linux build from the [Releases](../../releases) page:
 ### Local Routing & Failover
 
 - **API format conversion** — Local routing converts requests between Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, and Gemini Native: Claude Code and Claude Desktop can use OpenAI- or Gemini-format providers, and Codex and Grok Build can use Chat Completions or Anthropic Messages providers
-- **Per-tool toggle** — Claude Code, Codex, Gemini CLI, and Grok Build can each enter Routing mode separately: click "Start routing" on the "Routing" tab at the top of the page. In Routing mode, switching providers takes effect immediately for subsequent requests (Codex, Gemini CLI, and Grok Build may still need a restart if the switch changes the model). When you quit CC Switch, it writes the direct configuration back first and reconnects the next time it starts
+- **Per-tool toggle** — Claude Code, Codex, Gemini CLI, and Grok Build can each enter Routing mode separately with the routing switch in the app page header; it routes the provider that is currently in direct use. In Routing mode, switching providers takes effect immediately for subsequent requests (Codex, Gemini CLI, and Grok Build may still need a restart if the switch changes the model). When you quit CC Switch, it writes the direct configuration back first and reconnects the next time it starts
 - **Auto-failover** — Configure a failover queue for each tool; when a request fails, CC Switch automatically moves on to the next provider in the queue, backed by a circuit breaker and provider health monitoring
 - **Rectifier** — Automatically fixes certain requests that some upstreams can't handle (e.g. Thinking signatures, or falling back when images aren't supported)
 - Official providers (e.g. Claude Official) can't go through local routing (except Codex's OpenAI Official)
 - The routing service's status, listen address, and failover settings are all in "Settings → Local routing"
-
-### Aggregation Mode
-
-- **One model list, many providers** — On the Claude Code or Codex page, switch to "Aggregation" and add a few providers; their models all appear in the client's model picker. Each request goes to the provider of the model you pick, with no need to switch in CC Switch
-- **Add and remove anytime** — Click "Add" or "Remove" on a provider card, then pick one provider as the default; requests that don't name an aggregated model go to it. Codex's OpenAI Official can only be the default provider; Claude official subscriptions are currently unsupported in Aggregation
-- **Notes** — Aggregation doesn't provide failover; Claude Code requires version 2.1.243 or later; Codex needs a restart after the aggregated list changes, while Claude Code doesn't. When you switch models within a session, the new model has to rebuild its prompt cache, so the first turn costs a bit more
-- Much of Aggregation mode's design draws on [opencodex](https://github.com/lidge-jun/opencodex) — thanks to its author and contributors
 
 ### MCP, Prompts & Skills
 
@@ -186,21 +178,7 @@ It depends on the tool:
 
 - **Claude Code**: supports hot-switching of provider data — no restart needed.
 - **Codex, Gemini CLI, Grok Build**: restart your terminal or the CLI tool for changes to take effect (CC Switch reminds you after switching). In Routing mode, requests go to the new provider immediately, but all three tools may still need a restart if the switch changes the model.
-- **Aggregation mode**: changes to Claude Code's aggregated models take effect immediately; for Codex, entering or leaving Aggregation and changing the aggregated model list all require a full restart — see the next entry.
 - **Claude Desktop**: fully quit and reopen Claude Desktop; when using "Model Mapping", also keep CC Switch running.
-
-</details>
-
-<details>
-<summary><strong>In Aggregation mode, why don't the aggregated models show up in Codex's /model?</strong></summary>
-
-Codex reads its model list only at startup. After entering or leaving Aggregation mode, adding or removing an aggregated provider, or changing a provider's aggregated models, fully restart Codex to see the new list:
-
-- **Codex CLI**: Closing the terminal and running `codex` again isn't enough. Every `codex` in every terminal shares one background daemon, and it has to be restarted to pick up the new list. When CC Switch detects that Codex is still using the old list, it shows a notice at the top of the Codex page; click "Restart Codex daemon" in the notice. Restarting interrupts any tasks running in the daemon.
-- **Codex desktop app**: Quit it completely and reopen it (press ⌘Q on macOS; closing the window isn't enough).
-- **Editor extensions**: Reopen the editor window.
-
-Claude Code isn't affected: changes to aggregated models take effect immediately.
 
 </details>
 
@@ -229,7 +207,7 @@ Older versions saved the whole config file back to the provider when you switche
 
 CC Switch follows a "minimal intrusion" design principle — even if you uninstall the app, your tools will continue to work normally.
 
-So for tools that use one active provider at a time (Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build), the system always keeps one configuration in use, because deleting all configurations would make the corresponding tool unusable; to delete it, switch to another provider first. Likewise, the default provider in Aggregation mode can't be removed; make another provider the default first. If you rarely use a tool, you can hide it from the sidebar on the "Apps" page. To switch back to official login, see the next question.
+So for tools that use one active provider at a time (Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build), the system always keeps one configuration in use, because deleting all configurations would make the corresponding tool unusable; to delete it, switch to another provider first. If you rarely use a tool, you can hide it from the sidebar on the "Apps" page. To switch back to official login, see the next question.
 
 </details>
 
@@ -245,7 +223,7 @@ Note: official subscriptions use the tool's own login and don't go through local
 <details>
 <summary><strong>After I start routing, why does my config file point to 127.0.0.1?</strong></summary>
 
-In Routing mode, the tool's requests first go to CC Switch's local routing (`http://127.0.0.1:15721` by default), and CC Switch then forwards them to the provider you selected. That's why the tool's config file only contains the local address and the placeholder key `PROXY_MANAGED`; for Claude Code, the model name is also written as a fixed alias such as `claude-sonnet-5` (the `/model` menu still shows the real model name). The real provider address, key, and model are all stored in CC Switch. Aggregation mode works the same way.
+In Routing mode, the tool's requests first go to CC Switch's local routing (`http://127.0.0.1:15721` by default), and CC Switch then forwards them to the provider you selected. That's why the tool's config file only contains the local address and the placeholder key `PROXY_MANAGED`; for Claude Code, the model name is also written as a fixed alias such as `claude-sonnet-5` (the `/model` menu still shows the real model name). The real provider address, key, and model are all stored in CC Switch.
 
 In the request logs under "Usage" in the sidebar, you can see "requested model → actual model" for each request.
 
@@ -281,7 +259,7 @@ By default, everything is stored in the `.cc-switch` folder in your home directo
 - **Skill Backups**: `skill-backups/` (created automatically before uninstalling or updating a skill, keeping the 20 most recent)
 - **OAuth login credentials**: `copilot_auth.json`, `codex_oauth_auth.json`, `xai_oauth_auth.json`
 - **Logs**: `logs/cc-switch.log` and `crash.log` — please attach them when reporting an issue
-- **Device state**: `live-state.json` (whether each tool is currently in Direct, Routing, or Aggregation mode, and what was last written), `codex-login-stash.json` (the official Codex login moved aside when you switch to a third-party provider, restored when you switch back to an official one)
+- **Device state**: `live-state.json` (whether each tool is currently in Direct or Routing mode, and what was last written), `codex-login-stash.json` (the official Codex login moved aside when you switch to a third-party provider, restored when you switch back to an official one)
 - **Original config files**: `backups/live-first-write/` (each tool's config file as it was before CC Switch first rewrote it)
 
 After you change "CC Switch Configuration Directory" in "Settings → Data → Location", all of the files above except `settings.json`, the device state, and the original config files are stored in the new directory. CC Switch doesn't move existing files automatically, so copy them over manually first. `settings.json`, the device state, and the original config files belong to this computer only: they always stay in the default directory and are not included in cloud sync.
@@ -293,7 +271,7 @@ After you change "CC Switch Configuration Directory" in "Settings → Data → L
 
 CC Switch doesn't detect WSL automatically. In "Settings → App config", change the config directory for the corresponding tool to a path inside WSL, e.g. `\\wsl.localhost\Ubuntu\home\<user>\.claude`; after you save, CC Switch reads and writes the config inside WSL (supported for Claude Code, Codex, Gemini CLI, and Grok Build). Once this is set, the "Apps" page in the sidebar also detects and upgrades that tool in the corresponding WSL distribution.
 
-Note: Routing and Aggregation write `127.0.0.1` as the address into the config. In WSL2's default NAT networking mode, `127.0.0.1` inside WSL can't reach local routing on Windows; switch WSL to mirrored networking mode instead.
+Note: Routing writes `127.0.0.1` as the address into the config. In WSL2's default NAT networking mode, `127.0.0.1` inside WSL can't reach local routing on Windows; switch WSL to mirrored networking mode instead.
 
 </details>
 

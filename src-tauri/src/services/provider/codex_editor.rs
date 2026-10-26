@@ -32,7 +32,7 @@ use crate::provider::{Provider, ProviderMeta};
 use crate::store::AppState;
 
 use super::claude_editor::{ConflictPolicy, EditorView, InactiveField};
-use super::codex_direct::{self, Owner, Prepared, Target};
+use super::codex_direct::{self, Owner, Target};
 use super::editor_toml::{self, config_text, insert_at, render, Entry, TomlEdits};
 
 fn app() -> &'static str {
@@ -179,14 +179,7 @@ fn plan_for_view(
     owner: &Owner<'_>,
     provider: &Provider,
 ) -> Result<codex_direct::Planned, AppError> {
-    let plan = |provider: &Provider| {
-        codex_direct::plan(
-            db,
-            owner,
-            &Target::Direct(Some(provider)),
-            &Prepared::default(),
-        )
-    };
+    let plan = |provider: &Provider| codex_direct::plan(db, owner, &Target::Direct(Some(provider)));
     let error = match plan(provider) {
         Err(error) if is_keyless_fallback(&error) => error,
         other => return other,
@@ -483,13 +476,11 @@ pub(crate) fn write_live(
         } => {
             let owner = prev.map_or(Owner::None, Owner::Provider);
             let spec = Target::Direct(Some(target));
-            let prepared = codex_direct::Prepared::default();
-            let planned = codex_direct::plan(db, &owner, &spec, &prepared)?;
+            let planned = codex_direct::plan(db, &owner, &spec)?;
             codex_direct::run_with_edits(
                 db,
                 if set_pointer { op::SWITCH } else { op::APPLY },
                 planned,
-                &prepared,
                 PendingTarget::pointer(set_pointer.then(|| target.id.clone())),
                 Some(edits),
             )?;

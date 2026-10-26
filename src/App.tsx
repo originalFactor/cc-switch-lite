@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { invoke } from "@tauri-apps/api/core";
-import { MoreHorizontal, Plus, Search } from "lucide-react";
+import { MoreHorizontal, Plus, Search, Settings2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, UniversalProvider, VisibleApps } from "@/types";
@@ -69,6 +69,11 @@ import { UsagePage } from "@/components/usage/UsagePage";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { SwitchModePanel } from "@/components/providers/mode/SwitchModePanel";
 import { DesktopAccessBar } from "@/components/providers/mode/DesktopAccessBar";
+import { RoutingSwitch } from "@/components/providers/mode/RoutingSwitch";
+import { RouteSettingsSheet } from "@/components/providers/mode/RouteSettingsSheet";
+import { useAppMode } from "@/lib/query/proxy";
+import { useModeActions } from "@/hooks/useModeActions";
+import { blockedFromRouting } from "@/components/providers/presentation";
 import { proxyApi } from "@/lib/api/proxy";
 import type { StartupAttachFailure } from "@/types/proxy";
 import UsageScriptModal from "@/components/UsageScriptModal";
@@ -200,7 +205,7 @@ function App() {
     void checkToolUpdatesInBackground();
   }, [checkToolUpdatesOnStartup]);
 
-  // 启动时没能接上路由 / 聚合、已退回直连的应用：在对应的应用页提示一次并给「重试」
+  // 启动时没能接上路由、已退回直连的应用：在对应的应用页提示一次并给「重试」
   const [startupFailures, setStartupFailures] = useState<
     StartupAttachFailure[]
   >([]);
@@ -247,6 +252,12 @@ function App() {
 
   const { isRunning: isProxyRunning, takeoverStatus } = useProxyStatus();
   const proxyAppId = isProxyAppId(activeApp) ? activeApp : null;
+  // 应用页页头的路由开关：直连 ↔ 路由只换传输方式，直连指针不动，所以关掉后回到同一家。
+  const { data: headerModeView, isPending: headerModePending } = useAppMode(
+    proxyAppId ?? "",
+    !!proxyAppId,
+  );
+  const headerModeActions = useModeActions(proxyAppId ?? "claude");
   const openAddProvider = () => {
     setIsAddOpen(true);
   };
@@ -844,6 +855,30 @@ function App() {
     </DropdownMenu>
   );
 
+  const [routeSettingsOpen, setRouteSettingsOpen] = useState(false);
+
+  const headerRouting = (() => {
+    if (!proxyAppId) return null;
+    const direct = headerModeView?.directProviderId
+      ? providers[headerModeView.directProviderId]
+      : undefined;
+    const route = headerModeView?.routeProviderId
+      ? providers[headerModeView.routeProviderId]
+      : undefined;
+    const active = headerModeView?.mode ?? "direct";
+    // 打开开关路由到「现在直连的那家」：直连指针不动，关掉后同一家回来。它不能走路由
+    //（官方订阅等，Codex 官方登录除外）时开关是灰的，原因写在悬停说明里。
+    const disabledReason =
+      active === "route"
+        ? undefined
+        : direct === undefined
+          ? t("mode.noProvider")
+          : blockedFromRouting(proxyAppId, direct)
+            ? t("providerCard.reason.noRoute")
+            : undefined;
+    return { active, direct, route, disabledReason };
+  })();
+
   const renderAppPageHeader = () => (
     <AppPageHeader
       variant="app"
@@ -852,6 +887,58 @@ function App() {
       subtitle={t("appPage.providers")}
       actions={
         <>
+          {currentView === "providers" && headerRouting && (
+            <div className="flex items-center gap-1">
+              <RoutingSwitch
+                app={proxyAppId!}
+                active={headerRouting.active}
+                directProvider={headerRouting.direct}
+                routeProvider={headerRouting.route}
+                disabledReason={headerRouting.disabledReason}
+                pending={headerModeActions.pending || headerModePending}
+                onChange={(next) => {
+                  if (next) {
+                    // 打开时路由到「现在直连的那家」：直连指针不动，关掉后同一家回来。
+                    void headerModeActions
+                      .enter(
+                        headerRouting.direct?.id ?? null,
+                        headerRouting.direct?.name,
+                      )
+                      .catch((error) =>
+                        toast.error(
+                          t("mode.toast.failed", {
+                            detail:
+                              extractErrorMessage(error) || t("common.unknown"),
+                          }),
+                        ),
+                      );
+                    return;
+                  }
+                  void headerModeActions
+                    .exitToDirect({
+                      previous: {
+                        mode: headerRouting.active,
+                        routeProviderId: headerRouting.route?.id ?? null,
+                      },
+                      directProviderId: headerRouting.direct?.id ?? null,
+                      providerName: headerRouting.direct?.name ?? "",
+                    })
+                    .catch(() => undefined);
+                }}
+              />
+              <HoverTip content={t("mode.routeSettings")}>
+                <Button
+                  variant="quiet"
+                  size="icon-compact"
+                  className="h-8 w-8"
+                  aria-label={t("mode.routeSettings")}
+                  onClick={() => setRouteSettingsOpen(true)}
+                >
+                  <Settings2 className="h-4 w-4" strokeWidth={1.75} />
+                </Button>
+              </HoverTip>
+            </div>
+          )}
           {currentView === "providers" &&
             (settingsData?.showProfileSwitcher ?? false) && (
               <ProfileSwitcher activeApp={activeApp} />
@@ -916,7 +1003,6 @@ function App() {
           isLoading={isLoading}
           scrollRef={providerScrollContainerRef}
           onSwitch={switchProvider}
-          onOpenRoutingSettings={() => openSettings("routing")}
           needsRouteRequest={
             trayNeedsRoute?.app === proxyAppId ? trayNeedsRoute : undefined
           }
@@ -962,6 +1048,14 @@ function App() {
     <>
       {renderAppPageHeader()}
       {renderProviderList()}
+      {proxyAppId && (
+        <RouteSettingsSheet
+          app={proxyAppId}
+          open={routeSettingsOpen}
+          onOpenChange={setRouteSettingsOpen}
+          onOpenSettings={() => openSettings("routing")}
+        />
+      )}
     </>
   );
 

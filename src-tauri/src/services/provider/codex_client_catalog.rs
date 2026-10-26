@@ -320,8 +320,8 @@ fn current_fingerprint() -> String {
         .unwrap_or_else(|_| NO_CATALOG.to_string())
 }
 
-/// 记下新启动的 Codex 会读到的目录和文件登录身份。客户端文件每写一次（直连、进出代理、Stack
-/// 增删、退出时写回）和启动接上之后各调一次。
+/// 记下新启动的 Codex 会读到的目录和文件登录身份。客户端文件每写一次（直连、进出代理、
+/// 退出时写回）和启动接上之后各调一次。
 pub(crate) fn observe(store: &DeviceStore) {
     let now = (env().now_ms)();
     record(store, &current_fingerprint(), now);
@@ -902,8 +902,9 @@ mod tests {
         assert_eq!(current_fingerprint(), NO_CATALOG);
     }
 
-    /// 进 Stack → 守护进程启动 → 退出 CC Switch（撤掉指针）→ 再打开（写回同一份目录）：守护进程
-    /// 读到的正是现在这份，不提示。退出期间重启过的守护进程读到的是没有目录的配置，要提示。
+    /// 进路由（写目录）→ 守护进程启动 → 退出 CC Switch（撤掉指针）→ 再打开（写回同一份
+    /// 目录）：守护进程读到的正是现在这份，不提示。退出期间重启过的守护进程读到的是没有目录
+    /// 的配置，要提示。
     #[test]
     #[serial]
     fn quitting_and_reopening_cc_switch_is_not_stale() {
@@ -921,9 +922,9 @@ mod tests {
         };
         write_daemon_pid(59013);
 
-        point_at_catalog(Some("stack"));
+        point_at_catalog(Some("catalog"));
         observe(&store);
-        // 进 Stack 之后 10 秒守护进程启动。
+        // 进路由之后 10 秒守护进程启动。
         clock.store(1_010_000, Ordering::SeqCst);
         *table.lock().unwrap() = daemon_row("00:00");
         clock.store(1_060_000, Ordering::SeqCst);
@@ -934,14 +935,14 @@ mod tests {
         point_at_catalog(None);
         observe(&store);
         clock.store(1_120_000, Ordering::SeqCst);
-        point_at_catalog(Some("stack"));
+        point_at_catalog(Some("catalog"));
         observe(&store);
         *table.lock().unwrap() = daemon_row("01:50");
         assert_eq!(stale_clients(&store, true), None);
 
-        // 目录变了（Stack 增删）：守护进程还拿着旧的。
+        // 目录变了（供应商的模型目录改了）：守护进程还拿着旧的。
         clock.store(1_200_000, Ordering::SeqCst);
-        point_at_catalog(Some("stack + kimi"));
+        point_at_catalog(Some("catalog + kimi"));
         observe(&store);
         *table.lock().unwrap() = daemon_row("03:10");
         assert_eq!(
@@ -960,7 +961,7 @@ mod tests {
         clock.store(1_300_000, Ordering::SeqCst);
         *table.lock().unwrap() = daemon_row("00:30");
         clock.store(1_400_000, Ordering::SeqCst);
-        point_at_catalog(Some("stack + kimi"));
+        point_at_catalog(Some("catalog + kimi"));
         observe(&store);
         *table.lock().unwrap() = daemon_row("02:10");
         assert_eq!(

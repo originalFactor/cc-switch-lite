@@ -82,14 +82,6 @@ module.exports = {
           on: "var(--route-on)",
           border: "var(--route-border)",
         },
-        stack: {
-          DEFAULT: "var(--stack-fill)",
-          text: "var(--stack-text)",
-          soft: "var(--stack-soft)",
-          solid: "var(--stack-solid)",
-          on: "var(--stack-on)",
-          border: "var(--stack-border)",
-        },
         success: {
           DEFAULT: "var(--success)",
           text: "var(--success-text)",

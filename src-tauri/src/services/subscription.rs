@@ -695,40 +695,6 @@ fn read_codex_credentials_from_file() -> CodexCredentials {
     parse_codex_credentials_json(&content)
 }
 
-/// 系统钥匙串里 Codex 的登录（`cli_auth_credentials_store` 为 keyring / auto 时 Codex 存在
-/// 这里）。
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum CodexKeychainLogin {
-    // 只有 macOS 读得到钥匙串，其他平台的正式构建里只会出现 Unknown。
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    Found(serde_json::Value),
-    /// 确定没有，或者内容不是 JSON（Codex 自己也读不了，auto 模式同样退回 `auth.json`）。
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    Missing,
-    /// 读不出来：不是 macOS（Windows、Linux 的凭据库 CC Switch 读不了），或者 macOS 上
-    /// 访问被拒。Codex 看到的可能是另一个登录，不能拿 `auth.json` 顶替。
-    Unknown,
-}
-
-pub(crate) fn read_codex_keychain_login() -> CodexKeychainLogin {
-    #[cfg(target_os = "macos")]
-    {
-        match read_codex_keychain_secret() {
-            Ok(Some(secret)) => serde_json::from_str(&secret)
-                .map_or(CodexKeychainLogin::Missing, CodexKeychainLogin::Found),
-            Ok(None) => CodexKeychainLogin::Missing,
-            Err(error) => {
-                log::warn!("读取 Keychain 里的 Codex 登录失败: {error}");
-                CodexKeychainLogin::Unknown
-            }
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        CodexKeychainLogin::Unknown
-    }
-}
-
 /// 解析 Codex 凭据 JSON（Keychain 和文件共用）
 pub(crate) fn parse_codex_credentials_json(content: &str) -> CodexCredentials {
     let auth: CodexAuthJson = match serde_json::from_str(content) {

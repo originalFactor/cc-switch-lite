@@ -104,13 +104,6 @@
     --route-on: #ffffff;
     --route-border: var(--route-fill);
 
-    --stack-fill: #7c3aed;
-    --stack-text: #6d28d9;
-    --stack-soft: #f2ecfe;
-    --stack-solid: #6d28d9;
-    --stack-on: #ffffff;
-    --stack-border: var(--stack-fill);
-
     --success: #16a34a;
     --success-text: #007634;
     --success-soft: #e8f7ee;
@@ -188,13 +181,6 @@
     --route-solid: #1f7d72;
     --route-on: #ffffff;
     --route-border: color-mix(in srgb, var(--route-fill) 50%, transparent);
-
-    --stack-fill: #8b74d6;
-    --stack-text: #b5a6e3;
-    --stack-soft: rgba(139, 116, 214, 0.12);
-    --stack-solid: #6a52bf;
-    --stack-on: #ffffff;
-    --stack-border: color-mix(in srgb, var(--stack-fill) 50%, transparent);
 
     --success: #4ade80;
     --success-text: #4ade80;

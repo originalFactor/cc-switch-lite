@@ -114,28 +114,26 @@ export function useProxyStatus() {
     },
   });
 
-  // 按应用开启/关闭接管。stack 为真时进入的是 Stack 模式（和路由模式二选一）
+  // 按应用开启/关闭接管（页面头的路由开关）
   const setTakeoverForAppMutation = useMutation({
     mutationFn: ({
       appType,
       enabled,
-      stack = false,
+      route,
     }: {
       appType: string;
       enabled: boolean;
-      stack?: boolean;
-    }) => proxyApi.setProxyTakeoverForApp(appType, enabled, stack),
+      route?: string | null;
+    }) => proxyApi.setProxyTakeoverForApp(appType, enabled, route),
     onSuccess: (_data, variables) => {
       const appLabel = getAppLabel(variables.appType);
 
       toast.success(
         variables.enabled
-          ? variables.stack
-            ? t("proxy.stackMode.enabled", { app: appLabel })
-            : t("proxy.takeover.enabled", {
-                app: appLabel,
-                defaultValue: `已接管 ${appLabel} 配置（请求将走本地代理）`,
-              })
+          ? t("proxy.takeover.enabled", {
+              app: appLabel,
+              defaultValue: `已接管 ${appLabel} 配置（请求将走本地代理）`,
+            })
           : t("proxy.takeover.disabled", {
               app: appLabel,
               defaultValue: `已恢复 ${appLabel} 配置`,
@@ -148,37 +146,6 @@ export function useProxyStatus() {
       queryClient.invalidateQueries({
         queryKey: ["providers", variables.appType],
       });
-    },
-    onError: (error: Error) => {
-      const detail =
-        extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
-      toast.error(
-        t("proxy.takeover.failed", {
-          detail,
-          defaultValue: `操作失败: ${detail}`,
-        }),
-      );
-    },
-  });
-
-  // 设置里在路由和 Stack 之间换时：处于另一种模式的 Claude Code、Codex 先退回直连
-  const exitAppsInModeMutation = useMutation({
-    mutationFn: (stack: boolean) => proxyApi.exitProxyAppsInMode(stack),
-    onSuccess: (apps) => {
-      if (apps.length > 0) {
-        toast.success(
-          t("proxy.stackMode.exitedToDirect", {
-            apps: apps.map(getAppLabel).join(" / "),
-          }),
-          { closeButton: true },
-        );
-      }
-      queryClient.invalidateQueries({ queryKey: proxyKeys.status });
-      queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
-      for (const app of apps) {
-        queryClient.invalidateQueries({ queryKey: ["providers", app] });
-      }
     },
     onError: (error: Error) => {
       const detail =
@@ -206,7 +173,6 @@ export function useProxyStatus() {
 
     // 按应用接管开关
     setTakeoverForApp: setTakeoverForAppMutation.mutateAsync,
-    exitAppsInMode: exitAppsInModeMutation.mutateAsync,
 
     // 加载状态
     isStarting: startProxyServerMutation.isPending,
@@ -215,7 +181,6 @@ export function useProxyStatus() {
       startProxyServerMutation.isPending ||
       stopProxyServerMutation.isPending ||
       stopWithRestoreMutation.isPending ||
-      setTakeoverForAppMutation.isPending ||
-      exitAppsInModeMutation.isPending,
+      setTakeoverForAppMutation.isPending,
   };
 }

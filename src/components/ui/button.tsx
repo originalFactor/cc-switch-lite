@@ -34,8 +34,6 @@ const buttonVariants = cva(
           "border border-transparent bg-direct-solid text-direct-on font-semibold hover:brightness-110",
         route:
           "border border-transparent bg-route-solid text-route-on font-semibold hover:brightness-110",
-        stack:
-          "border border-transparent bg-stack-solid text-stack-on font-semibold hover:brightness-110",
       },
       size: {
         // 旧尺寸都映射到 v7 的三档：

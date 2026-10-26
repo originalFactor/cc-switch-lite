@@ -19,8 +19,8 @@ export interface ModeSnapshot {
 }
 
 /**
- * 进入 / 离开路由和聚合模式。进入要先在确认框里确认；回到直连不弹框，toast 里给「撤销」，
- * 撤销按原来的模式和路由目标重新进入。
+ * 进入 / 离开路由模式。页面头的开关直接调用；回到直连不弹框，toast 里给「撤销」，
+ * 撤销按原来的路由目标重新进入。
  */
 export function useModeActions(app: AppId) {
   const { t } = useTranslation();
@@ -40,34 +40,18 @@ export function useModeActions(app: AppId) {
     providersApi.updateTrayMenu().catch(() => undefined);
   }, [app, queryClient]);
 
-  /** 进入路由 / 聚合模式；已经在另一种代理模式时后端一次写完，不经过直连。抛出错误给确认框显示。 */
+  /** 进入路由模式，`route` 是这次的路由目标（不传沿用上次的）。抛出错误给调用方显示。 */
   const enter = useCallback(
-    async (
-      mode: Exclude<AppMode, "direct">,
-      route: string | null,
-      routeName?: string,
-    ) => {
+    async (route: string | null, routeName?: string) => {
       setPending(true);
       try {
-        await proxyApi.setProxyTakeoverForApp(
-          app,
-          true,
-          mode === "stack",
-          route,
-        );
+        await proxyApi.setProxyTakeoverForApp(app, true, route);
         await refresh();
         toast.success(
-          mode === "route"
-            ? t("mode.toast.enteredRoute", {
-                app: appName,
-                provider: routeName ?? "",
-              })
-            : t(
-                app === "codex"
-                  ? "mode.toast.enteredStack"
-                  : "mode.toast.enteredStackLive",
-                { app: appName },
-              ),
+          t("mode.toast.enteredRoute", {
+            app: appName,
+            provider: routeName ?? "",
+          }),
           { closeButton: true },
         );
       } finally {
@@ -112,7 +96,6 @@ export function useModeActions(app: AppId) {
             await proxyApi.setProxyTakeoverForApp(
               app,
               true,
-              previous.mode === "stack",
               previous.routeProviderId,
             );
             await refresh();

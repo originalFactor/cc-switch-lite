@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   CircleAlert,
   Info,
-  Layers,
   Route,
   X,
   type LucideIcon,
@@ -14,8 +13,7 @@ import { cn } from "@/lib/utils";
  * 通知条（v7 AUTHORING「通知条」）：圆角 10，左侧 16px 图标，不用左边框强调色。
  * 应用页的通知槽（NoticeSlot）里排成一列，按严重程度从上到下。
  */
-export type NoticeTone =
-  "neutral" | "warning" | "danger" | "route" | "stack" | "direct";
+export type NoticeTone = "neutral" | "warning" | "danger" | "route" | "direct";
 
 const TONE: Record<
   NoticeTone,
@@ -33,7 +31,6 @@ const TONE: Record<
     Icon: CircleAlert,
   },
   route: { box: "bg-route-soft", icon: "text-route-text", Icon: Route },
-  stack: { box: "bg-stack-soft", icon: "text-stack-text", Icon: Layers },
   direct: { box: "bg-direct-soft", icon: "text-direct-text", Icon: Info },
 };
 

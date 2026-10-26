@@ -1005,15 +1005,6 @@ fn probe_local_version(
     }
 }
 
-/// 本机实际安装的工具版本（和「关于」页探测的是同一个）；拿不到为 `None`。
-pub(crate) fn local_tool_version(tool: &str) -> Option<String> {
-    let (_, wsl_distro) = tool_env_type_and_wsl_distro(tool);
-    match probe_local_version(tool, wsl_distro.as_deref(), None, None) {
-        ShellProbe::Found(version) => Some(version),
-        _ => None,
-    }
-}
-
 async fn get_single_tool_version_impl(
     tool: &str,
     wsl_shell: Option<&str>,

@@ -44,11 +44,6 @@ export const settingsApi = {
     return await invoke("has_codex_unify_history_backup");
   },
 
-  /** Codex 的 config.toml 是否用 [features] multi_agent_v2 强制了新版子 agent 工具 */
-  async codexForcesMultiAgentV2(): Promise<boolean> {
-    return await invoke("codex_forces_multi_agent_v2");
-  },
-
   /** Codex 会话压缩开关（config.toml 的 [features] local_thread_store_compression） */
   async getCodexSessionCompression(): Promise<boolean> {
     return await invoke("get_codex_session_compression");

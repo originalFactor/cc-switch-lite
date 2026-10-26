@@ -31,20 +31,14 @@ function actions() {
   return {
     switchDirect: vi.fn(),
     needsRouteDialog: vi.fn(),
-    exitAndUse: vi.fn(),
     routeTo: vi.fn(),
     queueAdd: vi.fn(),
     queueRemove: vi.fn(),
     queueMove: vi.fn(),
-    stackAdd: vi.fn(),
-    stackRemove: vi.fn(),
-    stackSetDefault: vi.fn(),
   };
 }
 
-function build(
-  overrides: Partial<SwitchModeInput> & { active: AppMode; view: AppMode },
-) {
+function build(overrides: Partial<SwitchModeInput> & { active: AppMode }) {
   const input: SwitchModeInput = {
     app: "claude",
     t,
@@ -53,7 +47,6 @@ function build(
     routeId: null,
     failoverOn: false,
     queue: [],
-    stackMembers: new Map(),
     routingReason: () => "reason",
     serviceRunning: true,
     actions: actions(),
@@ -76,18 +69,9 @@ const button = (sections: ProviderSection[], id: string, key: string) => {
   return found;
 };
 
-/** 「更多」菜单里的「设为默认」 */
-const setDefaultItem = (sections: ProviderSection[], id: string) => {
-  const found = item(sections, id).menuItems?.find(
-    (m) => m.key === "setDefault",
-  );
-  if (!found) throw new Error(`no setDefault menu item on ${id}`);
-  return found;
-};
-
 describe("buildSwitchSections — direct", () => {
   it("marks the direct provider in use and asks before switching to one that needs routing", () => {
-    const { sections, input } = build({ active: "direct", view: "direct" });
+    const { sections, input } = build({ active: "direct" });
 
     expect(item(sections, "relay")).toMatchObject({
       tone: "direct",
@@ -104,63 +88,42 @@ describe("buildSwitchSections — direct", () => {
     );
   });
 
-  it("offers back-to-direct while viewing direct from routing, except for providers that need routing", () => {
-    const { sections, input } = build({
-      active: "route",
-      view: "direct",
-      routeId: "backup",
-    });
+  it("keeps the whole list in one section without preview branches", () => {
+    const { sections } = build({ active: "direct", routeId: "backup" });
 
-    expect(item(sections, "relay").chips.map((c) => c.key)).toContain("direct");
-    button(sections, "backup", "exitAndUse").onClick();
-    expect(input.actions.exitAndUse).toHaveBeenCalledWith(backup);
-    expect(
-      button(sections, "converted", "exitAndUse").disabledReason,
-    ).toBeTruthy();
+    expect(sections.map((s) => [s.key, s.items.length])).toEqual([["all", 4]]);
+    // 直连时上次的路由目标只是个记录，卡上不标、点它仍是直连切换
+    expect(item(sections, "backup").status).toBeUndefined();
+    expect(item(sections, "backup").chips).toEqual([]);
   });
 });
 
 describe("buildSwitchSections — delete guard", () => {
-  // 后端 is_referenced：直连指针、路由 / 聚合模式下的当前路由都删不掉，哪个视图都要标出来
-  it("disables delete on the direct provider in every view", () => {
-    for (const view of ["direct", "route", "stack"] as AppMode[]) {
-      const { sections } = build({ active: "direct", view });
+  // 后端 is_referenced：直连指针、路由模式下的当前路由都删不掉
+  it("disables delete on the direct provider in both modes", () => {
+    for (const active of ["direct", "route"] as AppMode[]) {
+      const { sections } = build({ active, routeId: "backup" });
       expect(item(sections, "relay").deleteDisabledReason).toBe(
         "providerCard.reason.inUseCannotDelete",
       );
-      expect(item(sections, "backup").deleteDisabledReason).toBeUndefined();
+      expect(item(sections, "backup").deleteDisabledReason).toBe(
+        active === "route"
+          ? "providerCard.reason.inUseCannotDelete"
+          : undefined,
+      );
+      expect(item(sections, "converted").deleteDisabledReason).toBeUndefined();
     }
   });
 
-  it("also disables delete on the provider being routed to while routing", () => {
-    const { sections } = build({
-      active: "route",
-      view: "direct",
-      routeId: "backup",
-    });
-    expect(item(sections, "relay").deleteDisabledReason).toBeTruthy();
-    expect(item(sections, "backup").deleteDisabledReason).toBeTruthy();
-    expect(item(sections, "converted").deleteDisabledReason).toBeUndefined();
-
-    // 直连时 routeId 只是上次的路由，不算在用
-    const direct = build({
-      active: "direct",
-      view: "route",
-      routeId: "backup",
-    });
-    expect(
-      item(direct.sections, "backup").deleteDisabledReason,
-    ).toBeUndefined();
+  it("does not count the remembered route target while direct", () => {
+    const { sections } = build({ active: "direct", routeId: "backup" });
+    expect(item(sections, "backup").deleteDisabledReason).toBeUndefined();
   });
 });
 
 describe("buildSwitchSections — route", () => {
   it("routes to a provider and keeps official subscriptions out", () => {
-    const { sections, input } = build({
-      active: "route",
-      view: "route",
-      routeId: "backup",
-    });
+    const { sections, input } = build({ active: "route", routeId: "backup" });
 
     expect(item(sections, "backup")).toMatchObject({
       tone: "route",
@@ -168,7 +131,6 @@ describe("buildSwitchSections — route", () => {
     });
     button(sections, "relay", "routeHere").onClick();
     expect(input.actions.routeTo).toHaveBeenCalledWith(relay);
-    // 路由页上没有跟直连那家有关的操作，不标「直连时使用」
     expect(item(sections, "relay").chips).toEqual([]);
     expect(item(sections, "official").dim).toBe(true);
     expect(button(sections, "official", "blocked").disabledReason).toBe(
@@ -179,7 +141,6 @@ describe("buildSwitchSections — route", () => {
   it("splits the failover queue from the rest and only moves within the queue", () => {
     const { sections, input } = build({
       active: "route",
-      view: "route",
       routeId: "relay",
       failoverOn: true,
       queue: ["relay", "backup"],
@@ -204,10 +165,9 @@ describe("buildSwitchSections — route", () => {
     button(sections, "backup", "queueRemove").onClick();
     expect(input.actions.queueRemove).toHaveBeenCalledWith(backup);
 
-    // 直连那家不在队列里时也不标「直连时使用」
+    // 直连那家不在队列里时也不标别的
     const outside = build({
       active: "route",
-      view: "route",
       routeId: "backup",
       failoverOn: true,
       queue: ["backup"],
@@ -222,7 +182,6 @@ describe("buildSwitchSections — route", () => {
     // 搜索把 P1 过滤掉了：剩下的卡序号、上下移仍按完整队列算
     const { sections, input } = build({
       active: "route",
-      view: "route",
       routeId: "backup",
       failoverOn: true,
       queue: ["relay", "backup", "converted"],
@@ -247,7 +206,6 @@ describe("buildSwitchSections — route", () => {
     // 记下的路由已不在队列里：退回队首
     const fallback = build({
       active: "route",
-      view: "route",
       routeId: "official",
       failoverOn: true,
       queue: ["relay", "backup"],
@@ -266,7 +224,6 @@ describe("buildSwitchSections — route", () => {
     const { sections, input } = build({
       app: "codex",
       active: "route",
-      view: "route",
       routeId: "relay",
       failoverOn: true,
       queue: ["relay"],
@@ -279,180 +236,6 @@ describe("buildSwitchSections — route", () => {
     );
     button(sections, "backup", "queueAdd").onClick();
     expect(input.actions.queueAdd).toHaveBeenCalledWith(backup);
-  });
-
-  it("offers no row action while previewing route from direct", () => {
-    const { sections } = build({
-      active: "direct",
-      view: "route",
-      routeId: "backup",
-    });
-
-    // 进入路由只有通知条一个入口（目标在确认框里选、预选上次那家），行上没有主操作，
-    // 也不标上次路由的那家和直连那家
-    for (const id of ["relay", "backup", "converted"]) {
-      expect(item(sections, id).buttons).toEqual([]);
-      expect(item(sections, id).chips).toEqual([]);
-      expect(item(sections, id).menuItems).toBeUndefined();
-    }
-    // 不能路由的官方订阅没有按钮可挂原因，原因在「官方」徽标上
-    expect(item(sections, "official")).toMatchObject({
-      dim: true,
-      buttons: [],
-      chips: [{ key: "official", title: "providerCard.reason.noRoute" }],
-    });
-  });
-});
-
-describe("buildSwitchSections — stack", () => {
-  it("shows the default, members and available providers", () => {
-    const { sections, input } = build({
-      active: "stack",
-      view: "stack",
-      routeId: "relay",
-      stackMembers: new Map([
-        ["relay", 2],
-        ["backup", 0],
-      ]),
-    });
-
-    expect(sections.map((s) => [s.key, s.items.length])).toEqual([
-      ["default", 1],
-      ["members", 1],
-      ["available", 2],
-    ]);
-    expect(item(sections, "relay")).toMatchObject({
-      section: "default",
-      tone: "stack",
-      status: { label: "providerCard.status.currentDefault" },
-    });
-    // 发布了 0 个模型的成员要提醒
-    expect(item(sections, "backup").chips[0]).toMatchObject({
-      key: "models",
-      tone: "warning",
-    });
-    // 行上只有名单的移除 / 添加；「设为默认」在「更多」菜单里
-    expect(item(sections, "backup").buttons.map((b) => b.key)).toEqual([
-      "remove",
-    ]);
-    button(sections, "backup", "remove").onClick();
-    expect(input.actions.stackRemove).toHaveBeenCalledWith(backup);
-    expect(setDefaultItem(sections, "backup")).toMatchObject({
-      label: "providerCard.action.setDefault",
-      disabledReason: undefined,
-    });
-    setDefaultItem(sections, "backup").onSelect();
-    expect(input.actions.stackSetDefault).toHaveBeenCalledWith(backup);
-
-    button(sections, "converted", "add").onClick();
-    expect(input.actions.stackAdd).toHaveBeenCalledWith(converted);
-    // 还没添加的也能直接设为默认
-    setDefaultItem(sections, "converted").onSelect();
-    expect(input.actions.stackSetDefault).toHaveBeenCalledWith(converted);
-    // 默认那家自己没有这一项
-    expect(item(sections, "relay").menuItems).toBeUndefined();
-    // Claude 官方订阅不能进聚合，也做不了默认
-    expect(button(sections, "official", "blocked").disabledReason).toBe(
-      "providerCard.reason.noStack",
-    );
-    expect(item(sections, "official").menuItems).toBeUndefined();
-  });
-
-  it("previews the stack outside Stack mode: rows only edit the list", () => {
-    const { sections, input } = build({
-      active: "direct",
-      view: "stack",
-      routeId: null,
-      stackMembers: new Map([["backup", 1]]),
-    });
-
-    // 没有路由目标时，默认那家落在直连那家
-    expect(item(sections, "relay")).toMatchObject({
-      section: "default",
-      tone: undefined,
-      status: { label: "providerCard.status.defaultAfterSwitch" },
-    });
-    // 行上没有会切模式的按钮，只有名单的添加 / 移除
-    expect(item(sections, "backup").buttons.map((b) => b.key)).toEqual([
-      "remove",
-    ]);
-    expect(item(sections, "converted").buttons.map((b) => b.key)).toEqual([
-      "add",
-    ]);
-    button(sections, "converted", "add").onClick();
-    expect(input.actions.stackAdd).toHaveBeenCalledWith(converted);
-    button(sections, "backup", "remove").onClick();
-    expect(input.actions.stackRemove).toHaveBeenCalledWith(backup);
-    expect(input.actions.stackSetDefault).not.toHaveBeenCalled();
-    // 「设为默认」在「更多」菜单里：直连时能点（只记下选择）
-    expect(setDefaultItem(sections, "backup").disabledReason).toBeUndefined();
-    setDefaultItem(sections, "converted").onSelect();
-    expect(input.actions.stackSetDefault).toHaveBeenCalledWith(converted);
-  });
-
-  it("does not let the Stack default change from the preview while routing", () => {
-    // 默认和路由目标是同一个指针：路由中改它就是当场换路由
-    const { sections } = build({
-      active: "route",
-      view: "stack",
-      routeId: "relay",
-      stackMembers: new Map([["backup", 1]]),
-    });
-
-    expect(item(sections, "relay").section).toBe("default");
-    for (const id of ["backup", "converted"]) {
-      expect(setDefaultItem(sections, id).disabledReason).toBe(
-        "providerCard.reason.defaultWhileRouting",
-      );
-    }
-  });
-
-  it("shows a Codex official account outside Stack mode with only the reason it cannot be added", () => {
-    const account = provider("account", {
-      category: "official",
-      settingsConfig: { auth: {}, config: "" },
-    });
-    const { sections } = build({
-      app: "codex",
-      active: "direct",
-      view: "stack",
-      providers: [relay, account],
-    });
-
-    expect(item(sections, "account").section).toBe("available");
-    expect(item(sections, "account").buttons.map((b) => b.key)).toEqual([
-      "add",
-    ]);
-    expect(button(sections, "account", "add").disabledReason).toBe(
-      "providerCard.reason.officialStack",
-    );
-    // 它能做默认
-    expect(setDefaultItem(sections, "account").disabledReason).toBeUndefined();
-  });
-
-  it("keeps Codex official cards out of Stack mode additions", () => {
-    const card = provider("legacy-official", {
-      id: "codex-official",
-      category: "official",
-      settingsConfig: { auth: {}, config: "" },
-    } as Partial<Provider>);
-    const { sections, input } = build({
-      app: "codex",
-      active: "stack",
-      view: "stack",
-      providers: [relay, backup, card],
-      routeId: "relay",
-      stackMembers: new Map([["relay", 1]]),
-    });
-
-    expect(item(sections, "codex-official").chips.map((c) => c.key)).toContain(
-      "official",
-    );
-    expect(button(sections, "codex-official", "add").disabledReason).toBe(
-      "providerCard.reason.officialStack",
-    );
-    setDefaultItem(sections, "codex-official").onSelect();
-    expect(input.actions.stackSetDefault).toHaveBeenCalledWith(card);
   });
 });
 
@@ -478,4 +261,3 @@ describe("buildDesktopSections", () => {
     expect(onSwitch).toHaveBeenCalledWith(relay);
   });
 });
-

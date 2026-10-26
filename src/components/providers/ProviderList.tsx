@@ -13,7 +13,6 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -61,17 +60,12 @@ interface ProviderListProps {
   /** 打开统一供应商表单：只对由它同步出来的子卡给出入口。 */
   onEditUniversal?: (parentId: string) => void;
   onCreate?: () => void;
-  /** 切换式应用必传：按模式 tab 算卡片 */
+  /** 切换式应用必传：按当前模式算卡片 */
   switchMode?: SwitchModeProps;
   isLoading?: boolean;
   /** 搜索面板开关由页头按钮控制时传入；不传则列表自己管（只能 ⌘F 打开） */
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
-  /**
-   * 模式行右端给搜索框留的位置（null＝位置还没挂上，先不画）；不传则放在列表第一行右端，
-   * 与第一个分组标题同行
-   */
-  searchSlot?: HTMLElement | null;
 }
 
 export function ProviderList({
@@ -89,7 +83,6 @@ export function ProviderList({
   isLoading = false,
   searchOpen,
   onSearchOpenChange,
-  searchSlot,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -346,21 +339,16 @@ export function ProviderList({
     </div>
   );
 
-  // 没有模式行的应用：第一个分组标题和搜索框同一行。这一行一直在（搜不到结果时只剩搜索框），
-  // 输入框在树里的位置不变，打字中途不会因为结果清空被重新挂载而丢焦点
-  const hostedSearch = searchSlot !== undefined;
+  // 第一个分组标题和搜索框同一行。这一行一直在（搜不到结果时只剩搜索框），输入框在树里
+  // 的位置不变，打字中途不会因为结果清空被重新挂载而丢焦点
   const leadSection = sections[0];
   const liftLeadTitle =
-    !hostedSearch &&
-    Boolean(leadSection?.title) &&
-    filteredProviders.length > 0;
-  const showListHeader =
-    !hostedSearch && (Boolean(leadSection?.title) || isSearchOpen);
+    Boolean(leadSection?.title) && filteredProviders.length > 0;
+  const showListHeader = Boolean(leadSection?.title) || isSearchOpen;
 
   // 卡片列表铺满主区域，和页头同宽
   return (
     <div className="space-y-4">
-      {searchSlot && createPortal(searchField, searchSlot)}
       {showListHeader && (
         <div
           className={cn(

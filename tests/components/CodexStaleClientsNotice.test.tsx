@@ -35,10 +35,10 @@ function renderNotice(staleClients: CodexStaleClients) {
 
 function clickRestartAndConfirm() {
   fireEvent.click(
-    screen.getByRole("button", { name: "proxy.stackMode.codexStale.restart" }),
+    screen.getByRole("button", { name: "proxy.codexStale.restart" }),
   );
   fireEvent.click(
-    screen.getByRole("button", { name: "proxy.stackMode.codexStale.confirm" }),
+    screen.getByRole("button", { name: "proxy.codexStale.confirm" }),
   );
 }
 
@@ -50,10 +50,10 @@ describe("CodexStaleClientsNotice", () => {
   it("explains a potentially cached account without claiming models are missing", () => {
     renderNotice({ daemon: true, others: false, auth: true });
     expect(
-      screen.getByText("proxy.stackMode.codexStale.authTitle"),
+      screen.getByText("proxy.codexStale.authTitle"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("proxy.stackMode.codexStale.title"),
+      screen.queryByText("proxy.codexStale.title"),
     ).not.toBeInTheDocument();
   });
 
@@ -72,16 +72,16 @@ describe("CodexStaleClientsNotice", () => {
       unverified: true,
     });
     expect(
-      screen.getByText("proxy.stackMode.codexStale.unverifiedTitle"),
+      screen.getByText("proxy.codexStale.unverifiedTitle"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("proxy.stackMode.codexStale.authTitle"),
+      screen.queryByText("proxy.codexStale.authTitle"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText("proxy.stackMode.codexStale.unverifiedHint"),
+      screen.getByText("proxy.codexStale.unverifiedHint"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "proxy.stackMode.codexStale.restart" }),
+      screen.queryByRole("button", { name: "proxy.codexStale.restart" }),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "common.close" }));
@@ -116,36 +116,36 @@ describe("CodexStaleClientsNotice", () => {
     const { invalidate } = renderNotice({ daemon: true, others: false });
 
     expect(
-      screen.getByText("proxy.stackMode.codexStale.daemon"),
+      screen.getByText("proxy.codexStale.daemon"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("proxy.stackMode.codexStale.others"),
+      screen.queryByText("proxy.codexStale.others"),
     ).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "proxy.stackMode.codexStale.restart" }),
+      screen.getByRole("button", { name: "proxy.codexStale.restart" }),
     );
     // 只是打开确认框：会中断正在运行的任务，没确认之前不重启。
     expect(
-      screen.getByText("proxy.stackMode.codexStale.confirmMessage"),
+      screen.getByText("proxy.codexStale.confirmMessage"),
     ).toBeInTheDocument();
     expect(restarts).toBe(0);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "proxy.stackMode.codexStale.confirm" }),
+      screen.getByRole("button", { name: "proxy.codexStale.confirm" }),
     );
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(
-        "proxy.stackMode.codexStale.restarted",
+        "proxy.codexStale.restarted",
         expect.anything(),
       ),
     );
     expect(restarts).toBe(1);
-    // 重新查 Stack 名单，提示随之消失。
+    // 重新查 Codex 客户端提示，重启后提示随之消失。
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["providers", "codex"] });
     await waitFor(() =>
       expect(
-        screen.queryByText("proxy.stackMode.codexStale.confirmMessage"),
+        screen.queryByText("proxy.codexStale.confirmMessage"),
       ).not.toBeInTheDocument(),
     );
   });
@@ -156,7 +156,7 @@ describe("CodexStaleClientsNotice", () => {
     clickRestartAndConfirm();
     await waitFor(() =>
       expect(toast.info).toHaveBeenCalledWith(
-        "proxy.stackMode.codexStale.notRunning",
+        "proxy.codexStale.notRunning",
         expect.anything(),
       ),
     );
@@ -173,7 +173,7 @@ describe("CodexStaleClientsNotice", () => {
     clickRestartAndConfirm();
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "proxy.stackMode.codexStale.failed",
+        "proxy.codexStale.failed",
       ),
     );
   });
@@ -181,11 +181,11 @@ describe("CodexStaleClientsNotice", () => {
   it("only explains how to reopen the desktop app", () => {
     renderNotice({ daemon: false, others: true });
     expect(
-      screen.getByText("proxy.stackMode.codexStale.others"),
+      screen.getByText("proxy.codexStale.others"),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
-        name: "proxy.stackMode.codexStale.restart",
+        name: "proxy.codexStale.restart",
       }),
     ).not.toBeInTheDocument();
   });

@@ -8,7 +8,6 @@ pub(crate) mod codex_client_catalog;
 pub(crate) mod codex_direct;
 mod codex_editor;
 mod codex_login;
-pub(crate) mod codex_official_models;
 mod editor_toml;
 mod endpoints;
 mod gemini_auth;
@@ -658,9 +657,9 @@ impl ProviderService {
         Err(error)
     }
 
-    /// 代理模式下存好了这一行：它是代理路由或在 Stack 名单里时按新行重写代理契约，契约没变
-    /// 就不碰客户端文件（见 [`crate::mode::controller::resync_saved_row_locked`]）。调用方
-    /// 持有这个应用的切换锁。
+    /// 代理模式下存好了这一行：它是代理路由时按新行重写代理契约，契约没变就不碰客户端
+    /// 文件（见 [`crate::mode::controller::resync_saved_row_locked`]）。调用方持有这个应用的
+    /// 切换锁。
     fn resync_proxy_for_saved_row(
         state: &AppState,
         app_type: &AppType,
@@ -733,8 +732,7 @@ impl ProviderService {
 
         let mode = crate::mode::current::mode_state(&app_type);
         // 代理模式下 live 的关键字段是代理契约，这里只写全局改动；编辑的是代理路由那家
-        // 或 Stack 名单里的一家时，写完按新行重写契约（契约没变就不动）。直连指针那家在
-        // 退出代理时写回。
+        // 时，写完按新行重写契约（契约没变就不动）。直连指针那家在退出代理时写回。
         let key_fields = EditorSaveKind::Update
             .writes_key_fields(state, &app_type, &mode, &provider.id)?
             .then_some(claude_editor::KeyFieldWrite {
@@ -783,8 +781,8 @@ impl ProviderService {
             ));
         }
 
-        // For other apps: 是否是直连指针那家。代理模式下是不是代理路由或 Stack 名单里的一家，
-        // 由同步 live 的那一步判断。
+        // For other apps: 是否是直连指针那家。代理模式下是不是代理路由，由同步 live 的
+        // 那一步判断。
         let mode = crate::mode::current::mode_state(&app_type);
         let is_direct_current = crate::mode::current::provider_for(
             &state.db,
@@ -832,7 +830,7 @@ impl ProviderService {
     ///
     /// - 直连模式下编辑直连那家：先存行，再只替换 live 里的关键字段和独有字段（换托管
     ///   账号时先采纳、再清掉旧账号的登录）；写 live 失败就把行恢复原样。
-    /// - 代理模式下先存行，编辑的是路由那家或 Stack 名单里的一家时按新行重写代理契约（见
+    /// - 代理模式下先存行，编辑的是路由那家时按新行重写代理契约（见
     ///   [`Self::resync_proxy_for_saved_row`]），写失败同样把行恢复原样。
     /// - 其余只存行。
     fn update_codex(
@@ -889,15 +887,6 @@ impl ProviderService {
             return Err(AppError::Message(
                 "无法删除当前正在使用的供应商".to_string(),
             ));
-        }
-
-        // Stack 名单里的先移出（和客户端文件同一个操作提交，key 留在登记簿里），成功了再删行。
-        // 删行失败时它已经不在名单里，重新加入即可。
-        if crate::mode::stack::is_member(&app_type, id)? {
-            futures::executor::block_on(crate::mode::controller::set_stack_member(
-                state, &app_type, id, false,
-            ))
-            .map_err(|error| AppError::Message(error.message))?;
         }
 
         state.db.delete_provider(app_type.as_str(), id)
@@ -4230,7 +4219,7 @@ command = "legacy-cmd"
         })
         .await
         .expect("update proxy config");
-        crate::mode::controller::enter(&state, &AppType::Claude, false)
+        crate::mode::controller::enter(&state, &AppType::Claude, None)
             .await
             .expect("enter routing mode");
         let proxy_url = state
@@ -4322,7 +4311,7 @@ requires_openai_auth = true
         })
         .await
         .expect("update proxy config");
-        crate::mode::controller::enter(&state, &AppType::Codex, false)
+        crate::mode::controller::enter(&state, &AppType::Codex, None)
             .await
             .expect("enter routing mode");
         assert!(

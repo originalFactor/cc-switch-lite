@@ -13,7 +13,6 @@ import {
   Globe,
   History,
   Info,
-  Layers,
   LayoutGrid,
   Route,
   Server,
@@ -344,12 +343,6 @@ function modeTag(
       className: "bg-route-soft text-route-text",
     };
   }
-  if (status.mode === "stack") {
-    return {
-      label: t("nav.mode.stack"),
-      className: "bg-stack-soft text-stack-text",
-    };
-  }
   return null;
 }
 
@@ -373,9 +366,7 @@ function AppNavItem({
     ? t("nav.mode.mappingFull")
     : status.mode === "route"
       ? t("nav.mode.route")
-      : status.mode === "stack"
-        ? t("nav.mode.stack")
-        : null;
+      : null;
   const tip = status.alert
     ? `${name} · ${t("nav.needsAttention")}`
     : modeName
@@ -386,11 +377,9 @@ function AppNavItem({
   if (collapsed) {
     const marker = status.alert
       ? { className: "bg-danger text-action-fg", icon: AlertGlyph }
-      : status.mode === "stack"
-        ? { className: "bg-stack-solid text-stack-on", icon: Layers }
-        : status.mode === "route" || status.mapping
-          ? { className: "bg-route-solid text-route-on", icon: Route }
-          : null;
+      : status.mode === "route" || status.mapping
+        ? { className: "bg-route-solid text-route-on", icon: Route }
+        : null;
     return (
       <HoverTip content={tip} side="right" disableHoverableContent>
         <button

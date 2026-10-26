@@ -1175,11 +1175,6 @@ pub fn run() {
                 crate::mode::controller::startup(&state).await;
                 // 启动流程走完：托盘这时才开始报「路由服务没在运行」，并记下退回直连的应用。
                 crate::tray::mark_startup_settled(&app_handle);
-                // Codex 官方做路由、发布了 Stack 模型时，官方模型列表过期就在后台刷新。
-                crate::services::provider::codex_official_models::start_background_checks(
-                    state.inner().clone(),
-                );
-
                 // Periodic backup check (on startup)
                 if let Err(e) = state.db.periodic_backup_if_needed() {
                     log::warn!("Periodic backup failed on startup: {e}");
@@ -1350,7 +1345,6 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::has_codex_unify_history_backup,
-            commands::codex_forces_multi_agent_v2,
             commands::get_codex_session_compression,
             commands::set_codex_session_compression,
             commands::get_codex_sessions_disk_usage,
@@ -1508,7 +1502,6 @@ pub fn run() {
             commands::take_startup_attach_failures,
             tray::take_tray_navigation,
             tray::tray_app_page_seen,
-            commands::exit_proxy_apps_in_mode,
             commands::get_direct_provider,
             commands::get_proxy_status,
             commands::get_proxy_config,
@@ -1525,9 +1518,7 @@ pub fn run() {
             commands::is_proxy_running,
             commands::is_live_takeover_active,
             commands::switch_proxy_provider,
-            commands::get_proxy_stack,
-            commands::set_proxy_stack_member,
-            commands::adopt_codex_stack_catalog,
+            commands::get_codex_stale_clients,
             commands::restart_codex_app_server_daemon,
             commands::acknowledge_codex_stale_clients,
             // Proxy failover commands

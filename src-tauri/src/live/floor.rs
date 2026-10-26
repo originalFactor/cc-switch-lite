@@ -74,7 +74,7 @@ pub const CLAUDE_FLOOR_TOP: &[&str] = &[
     // 备用模型链；模型 ID → 供应商专属 ID（如 Bedrock ARN）。
     "fallbackModel",
     "modelOverrides",
-    // `/model` 选择器的行：聚合模式下是 CC Switch 列的 Stack 模型，其余时候不留。
+    // `/model` 选择器的行：不属于任何一家，切换时清掉。
     "modelPicker",
     // advisor 只在 Anthropic API 上可用。
     "advisorModel",
@@ -111,8 +111,7 @@ pub const CLAUDE_EXCLUSIVE_ENV: &[&str] = &[
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
     "CLAUDE_CODE_DISABLE_1M_CONTEXT",
     "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT",
-    // 向 ANTHROPIC_BASE_URL 取模型列表：网关（含代理模式下的 Stack 模型）要它，用户也可能
-    // 自己设成全局。
+    // 向 ANTHROPIC_BASE_URL 取模型列表：网关要它，用户也可能自己设成全局。
     "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
 ];
 

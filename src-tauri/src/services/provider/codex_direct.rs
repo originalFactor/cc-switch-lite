@@ -5,11 +5,10 @@
 //! 进入 / 退出代理）都走这里。不回填、不合并通用配置片段、不补回 MCP：这些设置本来就
 //! 留在 live 里。
 //!
-//! 分三步：
-//! 1. [`prepare_official_rows`]：拿写锁之前做要联网的事（取官方模型行）；
-//! 2. [`plan`]：在内存里算出 `config.toml` 的补丁、模型目录和代理契约，行有问题就在这里
+//! 分两步：
+//! 1. [`plan`]：在内存里算出 `config.toml` 的补丁、模型目录和代理契约，行有问题就在这里
 //!    报错，什么都不写；
-//! 3. [`run`]：拿写锁，读 live 的 `auth.json` 决定它的去向（见 `codex_login`），再按
+//! 2. [`run`]：拿写锁，读 live 的 `auth.json` 决定它的去向（见 `codex_login`），再按
 //!    盘上有没有登录定下路由表的 `requires_openai_auth`，一起提交。
 
 use serde_json::{Map, Value};
@@ -22,9 +21,6 @@ use crate::codex_config::{
     get_codex_config_path, get_codex_model_catalog_path, plan_codex_model_catalog,
     CodexAuthStoreMode,
 };
-use crate::codex_config::{
-    plan_codex_stack_catalog, CodexCatalogRow, CodexStackCatalogMember, CodexStackRoute,
-};
 use crate::config::sorted_json_bytes;
 use crate::database::Database;
 use crate::error::AppError;
@@ -32,19 +28,16 @@ use crate::live::engine::{digest, read_current, DeviceStore, LiveFile};
 use crate::live::patch::toml::{value_text, TomlDocPatch, TomlSteps};
 use crate::live::patch::{Guarded, LivePatch, WholeFile};
 use crate::live::project::codex::{
-    official_mirror_table, proxy_route_table, requires_openai_auth, row_catalog_pointer,
-    without_row_catalog, CodexConfigPatch, CodexProjection, KnownTable, Route, RouteAuth,
-    RouteWrite, RowInput, ROUTE_ID, WEB_SEARCH_DISABLED,
+    official_mirror_table, proxy_route_table, requires_openai_auth, CodexConfigPatch,
+    CodexProjection, KnownTable, Route, RouteAuth, RouteWrite, RowInput, ROUTE_ID,
+    WEB_SEARCH_DISABLED,
 };
 use crate::mode::contract::CONTRACT_VERSION;
 use crate::mode::operation::{AppWrite, FileChange, OperationReport};
-use crate::mode::stack::Member;
 use crate::mode::state::{Contract, PendingTarget};
 use crate::provider::Provider;
-use crate::services::subscription::CodexKeychainLogin;
 
-use super::codex_login::{self, AuthInput, AuthPlan, AuthTarget, LoginStash, STASH_FILENAME};
-use super::codex_official_models::{self, NativeRows, OfficialLogin, OfficialSkip};
+use super::codex_login::{self, AuthInput, AuthTarget, LoginStash, STASH_FILENAME};
 
 fn app() -> &'static str {
     AppType::Codex.as_str()
@@ -98,12 +91,10 @@ fn is_proxy_base_url(url: &str, address: &str, port: u16) -> bool {
 pub(crate) enum Target<'a> {
     /// 直连：这个供应商（`None`：没有直连供应商，只清掉关键字段）。
     Direct(Option<&'a Provider>),
-    /// 代理契约：路由供应商；`base_url` 是本地代理给 Codex 的地址（带 `/v1`）；`stack` 是
-    /// 发布的 Stack 供应商（不含路由那家），为空时和没有 Stack 模型逐字节一致。
+    /// 代理契约：路由供应商；`base_url` 是本地代理给 Codex 的地址（带 `/v1`）。
     Proxy {
         route: &'a Provider,
         base_url: &'a str,
-        stack: &'a [Member],
     },
 }
 
@@ -129,58 +120,6 @@ impl<'a> Owner<'a> {
     }
 }
 
-/// 拿写锁之前准备好的官方模型行。
-#[derive(Default)]
-pub(crate) struct Prepared {
-    /// 官方做路由、又发布了 Stack 模型时目录里的官方行（[`prepare_official_rows`]）。
-    native: Option<NativeRows>,
-    /// 钥匙串里 Codex 的登录，在拿锁之前读好（见 [`prepare_official_rows`]）：钥匙串不归
-    /// 写锁管，`security` 还可能弹出授权对话框，不能让写锁等着用户点。锁里没有就当读不出。
-    keychain: Option<CodexKeychainLogin>,
-}
-
-fn target_provider<'a>(target: &Target<'a>) -> Option<&'a Provider> {
-    match target {
-        Target::Direct(provider) => *provider,
-        Target::Proxy { route, .. } => Some(route),
-    }
-}
-
-/// 官方做路由、又发布了 Stack 模型时，按操作之后 Codex 会用的登录取官方模型行。可能联网，
-/// 所以和 [`prepare_official_rows`] 一样在拿写锁之前做；登录是按未加锁读到的内容预测的，拿锁后在
-/// [`run_with_edits`] 里按真实输入再核对一次。
-///
-/// 读钥匙串（`security` 可能等用户点授权框）和取官方行（跑 Codex 子进程、联网最多
-/// 10 秒）放到阻塞线程池里做，不占异步运行时的工作线程。
-pub(crate) async fn prepare_official_rows(
-    db: &Database,
-    owner: &Owner<'_>,
-    target: &Target<'_>,
-    prepared: &mut Prepared,
-) -> Result<(), AppError> {
-    let Target::Proxy { route, stack, .. } = target else {
-        return Ok(());
-    };
-    if !needs_official_rows(route, stack) {
-        return Ok(());
-    }
-    if matches!(
-        codex_config_auth_store_mode(&read_config_text()),
-        CodexAuthStoreMode::Keyring | CodexAuthStoreMode::Auto
-    ) {
-        prepared.keychain = Some(off_runtime(codex_official_models::keychain_login).await?);
-    }
-    let login = predicted_official_login(db, owner, target, prepared)?;
-    let rows = off_runtime(move || codex_official_models::rows_for_switch(&login)).await?;
-    // 取官方行最多要 10 秒，这期间 Codex 可能在钥匙串里换了号。取完再读一次，拿锁后按
-    // 这次读到的核对（见 `run_with_edits`），换了号就停下。
-    if rows.identity().is_some() && prepared.keychain.is_some() {
-        prepared.keychain = Some(off_runtime(codex_official_models::keychain_login).await?);
-    }
-    prepared.native = Some(rows);
-    Ok(())
-}
-
 /// 放到阻塞线程池里做，不占异步运行时的工作线程。
 pub(crate) async fn off_runtime<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
@@ -190,79 +129,10 @@ pub(crate) async fn off_runtime<T: Send + 'static>(
         .map_err(|error| AppError::Message(format!("后台线程异常退出: {error}")))
 }
 
-/// 官方做路由、发布了 Stack 模型：目录里要写全官方模型。
-pub(crate) fn needs_official_rows(route: &Provider, stack: &[Member]) -> bool {
-    !stack.is_empty() && is_official(route)
-}
-
-/// 按未加锁读到的内容预测这次操作之后 Codex 会用的登录（能取官方列表的才是 `Ok`，否则带
-/// 着取不到的原因）。钥匙串没预先读过（[`prepare_official_rows`] 之外的调用方）就在用到时
-/// 读，调用方要在阻塞线程里。
-pub(crate) fn predicted_official_login(
-    db: &Database,
-    owner: &Owner<'_>,
-    target: &Target<'_>,
-    prepared: &Prepared,
-) -> Result<Result<OfficialLogin, OfficialSkip>, AppError> {
-    // 先按没有官方行算一遍，拿到这次对 auth.json 的去向（目录在第二遍才算）。
-    let planned = plan(db, owner, target, prepared)?;
-    let live = read_current(&get_codex_auth_path())
-        .ok()
-        .flatten()
-        .map(|bytes| serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null));
-    let stash = load_stash(
-        &DeviceStore::for_device(),
-        &planned.official_logins,
-        live.as_ref(),
-    )
-    .stash;
-    let auth_plan = codex_login::plan(AuthInput {
-        live: live.as_ref(),
-        third_party_keys: &planned.retired_keys,
-        leaving_official: planned.leaving_official.as_ref(),
-        target: auth_target(&planned.auth),
-        stash,
-    });
-    let keychain = || {
-        prepared
-            .keychain
-            .clone()
-            .unwrap_or_else(codex_official_models::keychain_login)
-    };
-    Ok(
-        login_after(&auth_plan, live.as_ref(), &read_config_text(), keychain)
-            .ok_or(OfficialSkip::NoLogin)
-            .and_then(|auth| OfficialLogin::of(&auth)),
-    )
-}
-
-/// 操作之后 Codex 实际会用的登录，按 `cli_auth_credentials_store`：file 看操作之后的
-/// `auth.json`；keyring 看系统钥匙串（CC Switch 不改它）；auto 钥匙串里有就用它，确定
-/// 没有才同 file（读不出钥匙串时 Codex 可能用着另一个登录，`auth.json` 不能顶替）；
-/// ephemeral 和认不出的没有。`keychain` 只在要看钥匙串时调用。
-fn login_after(
-    auth_plan: &AuthPlan,
-    live: Option<&Value>,
-    config_text: &str,
-    keychain: impl FnOnce() -> CodexKeychainLogin,
-) -> Option<Value> {
-    let from_file = || match &auth_plan.auth {
-        None => live.cloned(),
-        Some(None) => None,
-        Some(Some(auth)) => Some(auth.clone()),
-    };
-    match codex_config_auth_store_mode(config_text) {
-        CodexAuthStoreMode::File => from_file(),
-        CodexAuthStoreMode::Keyring => match keychain() {
-            CodexKeychainLogin::Found(login) => Some(login),
-            CodexKeychainLogin::Missing | CodexKeychainLogin::Unknown => None,
-        },
-        CodexAuthStoreMode::Auto => match keychain() {
-            CodexKeychainLogin::Found(login) => Some(login),
-            CodexKeychainLogin::Missing => from_file(),
-            CodexKeychainLogin::Unknown => None,
-        },
-        CodexAuthStoreMode::Ephemeral | CodexAuthStoreMode::Unknown => None,
+fn target_provider<'a>(target: &Target<'a>) -> Option<&'a Provider> {
+    match target {
+        Target::Direct(provider) => *provider,
+        Target::Proxy { route, .. } => Some(route),
     }
 }
 
@@ -434,8 +304,6 @@ pub(crate) struct Planned {
     leaving_official: Option<Value>,
     retired_keys: Vec<String>,
     official_logins: Vec<Value>,
-    /// 目录里的官方行取自哪个登录的官方列表：拿写锁后和实际的目标登录核对。
-    native_identity: Option<String>,
     /// 代理契约（直连时也算，没有用处）。
     pub contract: Contract,
 }
@@ -452,13 +320,12 @@ pub(crate) fn plan(
     db: &Database,
     owner: &Owner<'_>,
     target: &Target<'_>,
-    prepared: &Prepared,
 ) -> Result<Planned, AppError> {
     let facts = row_facts(db)?;
     let provider = target_provider(target);
     let projection = provider.map(project).transpose()?;
 
-    let (top, mut nested, mut exclusive) = match (&projection, provider) {
+    let (top, nested, exclusive) = match (&projection, provider) {
         (Some(projection), Some(provider)) => (
             projection.top.clone(),
             projection.nested.clone(),
@@ -501,12 +368,7 @@ pub(crate) fn plan(
                 Route::Default => (RouteWrite::Default, None, auth),
             }
         }
-        (
-            Target::Proxy {
-                route, base_url, ..
-            },
-            Some(_),
-        ) => {
+        (Target::Proxy { route, base_url }, Some(_)) => {
             if official {
                 let auth = AuthGoal::Official(row_auth(route));
                 (
@@ -527,26 +389,8 @@ pub(crate) fn plan(
         }
     };
 
-    let stack = match target {
-        Target::Proxy { stack, .. } => *stack,
-        Target::Direct(_) => &[],
-    };
-    // 聚合模式下子代理跟随主模型（用户在模型选择器里选的），和 Claude Code 一样不写：行里
-    // 是路由那家的模型名，主模型换成别家的 Stack 模型后，子代理会被悄悄发回路由那家。
-    if !stack.is_empty() {
-        nested.retain(|(path, _)| !is_subagent_key(path));
-    }
-    let stack_catalog = match (provider, &projection) {
-        (Some(provider), Some(projection)) => stack_catalog(provider, projection, stack, prepared)?,
-        _ => None,
-    };
-    let catalog = match (stack_catalog, provider, &projection) {
-        (Some(catalog), _, _) => {
-            // 窗口类全局键会覆盖目录里的每一行，改由各家写进自己的行。
-            exclusive.retain(|(key, _)| !STACK_SUNK_WINDOW_KEYS.contains(&key.as_str()));
-            Some(catalog)
-        }
-        (None, Some(provider), Some(projection)) => {
+    let catalog = match (provider, &projection) {
+        (Some(provider), Some(projection)) => {
             plan_codex_model_catalog(
                 &provider.settings_config,
                 &projection.catalog_input_text(),
@@ -592,129 +436,8 @@ pub(crate) fn plan(
         leaving_official,
         retired_keys: facts.third_party_keys,
         official_logins: facts.official_logins,
-        native_identity: prepared
-            .native
-            .as_ref()
-            .and_then(NativeRows::identity)
-            .map(str::to_string),
         contract,
     })
-}
-
-/// 能不能加进 Stack：配置要能解析。之后才坏掉的成员在目录里跳过（见 [`stack_catalog`]）。
-pub(crate) fn check_stack_member(provider: &Provider) -> Result<(), AppError> {
-    project(provider).map(|_| ()).map_err(|error| {
-        AppError::Message(format!(
-            "「{name}」的配置有问题，不能加入聚合 (The configuration of \"{name}\" is invalid, so it cannot join the aggregation): {error}",
-            name = provider.name
-        ))
-    })
-}
-
-/// 路由那家的行指定了自己管理的模型目录文件（`model_catalog_json`）：Codex 只读那个
-/// 文件，Stack 模型合并不进去。
-pub(crate) fn route_owns_catalog(route: &Provider) -> bool {
-    project(route).is_ok_and(|projection| row_catalog_pointer(&projection.top).is_some())
-}
-
-/// 去掉路由那家行里自己指定的模型目录指针之后的 `settings_config`；行里没有时为 `None`。
-pub(crate) fn settings_without_row_catalog(route: &Provider) -> Option<Value> {
-    let text = without_row_catalog(route.settings_config.get("config")?.as_str()?)?;
-    let mut settings = route.settings_config.clone();
-    settings
-        .as_object_mut()?
-        .insert("config".to_string(), Value::String(text));
-    Some(settings)
-}
-
-/// 发布了 Stack 模型时不写进 `config.toml` 的全局键：Codex 拿它们覆盖目录里的每一行。
-const STACK_SUNK_WINDOW_KEYS: &[&str] = &["model_context_window", "model_auto_compact_token_limit"];
-
-/// `[agents]` 里的子代理模型和推理强度（`floor::CODEX_FLOOR_NESTED` 的前两项）。
-fn is_subagent_key(path: &[String]) -> bool {
-    path.first().is_some_and(|table| table == "agents")
-}
-
-/// 发布了 Stack 模型时的合并目录（路由那家的行在前，Stack 里的在后）；没有要发布的 Stack 模型，
-/// 或者这次发布不了时为 `None`，目录照原来的规则算。
-fn stack_catalog(
-    route: &Provider,
-    projection: &CodexProjection,
-    stack: &[Member],
-    prepared: &Prepared,
-) -> Result<Option<serde_json::Value>, AppError> {
-    if stack.is_empty() {
-        return Ok(None);
-    }
-    // 路由那家的行指定了自己管理的目录文件：Codex 只读那个文件，合并不进去（界面上
-    // 由 `route_owns_catalog` 给出提示）。
-    if row_catalog_pointer(&projection.top).is_some() {
-        log::warn!(
-            "Codex 路由供应商 {} 使用自己的模型目录文件，Stack 模型不发布",
-            route.id
-        );
-        return Ok(None);
-    }
-    let route_text = projection.catalog_input_text();
-    let route_row = if is_official(route) {
-        // 写了目录之后 Codex 只认文件里的模型：拿不到官方行时不能写出只有 Stack 模型的目录。
-        match prepared.native.as_ref().and_then(NativeRows::rows) {
-            Some(rows) => CodexStackRoute::Official {
-                native: rows.to_vec(),
-                config_text: &route_text,
-            },
-            None => {
-                if prepared.native.is_some() {
-                    log::warn!("读取不到 Codex 模型列表，Stack 模型暂不发布");
-                }
-                return Ok(None);
-            }
-        }
-    } else {
-        CodexStackRoute::ThirdParty(CodexCatalogRow {
-            settings: &route.settings_config,
-            config_text: &route_text,
-            profile: crate::proxy::providers::resolve_codex_catalog_tool_profile(route),
-        })
-    };
-
-    // 一家的配置坏了（比如云同步带来的行解析不了）只跳过这一家：报错会让进出代理、换
-    // 路由、启动时接上这些 Codex 写入全部失败。
-    let inputs: Vec<_> = stack
-        .iter()
-        .filter_map(|member| match project(&member.provider) {
-            Ok(projection) => Some((
-                member,
-                projection.catalog_input_text(),
-                crate::proxy::providers::resolve_codex_catalog_tool_profile(&member.provider),
-            )),
-            Err(error) => {
-                log::warn!(
-                    "Stack 模型「{}」的配置有问题，这次不发布它: {error}",
-                    member.provider.name
-                );
-                None
-            }
-        })
-        .collect();
-    let members: Vec<CodexStackCatalogMember<'_>> = inputs
-        .iter()
-        .map(|(member, config_text, profile)| CodexStackCatalogMember {
-            key: &member.key,
-            provider_name: &member.provider.name,
-            row: CodexCatalogRow {
-                settings: &member.provider.settings_config,
-                config_text,
-                profile: *profile,
-            },
-        })
-        .collect();
-    plan_codex_stack_catalog(
-        route_row,
-        &members,
-        crate::settings::codex_stack_classic_subagents(),
-    )
-    .map(Some)
 }
 
 fn table_text(table: &Table) -> String {
@@ -838,10 +561,9 @@ pub(crate) fn run(
     db: &Database,
     op: &str,
     planned: Planned,
-    prepared: &Prepared,
     pending: PendingTarget,
 ) -> Result<OperationReport, AppError> {
-    run_with_edits(db, op, planned, prepared, pending, None)
+    run_with_edits(db, op, planned, pending, None)
 }
 
 /// 同 [`run`]，另把编辑器里对全局设置的改动在同一次 `config.toml` 写入里应用。
@@ -849,7 +571,6 @@ pub(crate) fn run_with_edits(
     db: &Database,
     op: &str,
     planned: Planned,
-    prepared: &Prepared,
     pending: PendingTarget,
     edits: Option<&super::editor_toml::TomlEdits>,
 ) -> Result<OperationReport, AppError> {
@@ -884,28 +605,6 @@ pub(crate) fn run_with_edits(
         target: auth_target(&planned.auth),
         stash,
     });
-    let config_text = read_config_text();
-    // 目录里的官方行是按拿锁前预测的登录取的：实际的目标登录换了人（Codex 恰好重新登录、
-    // settle 补完了上一次操作），就停下，什么都不写。不能换成别的来源：目录已经算进契约。
-    // 钥匙串用取完官方行后读到的那次（见 `prepare_official_rows`），不在锁里读。
-    if let Some(expected) = &planned.native_identity {
-        let keychain = || {
-            prepared
-                .keychain
-                .clone()
-                .unwrap_or(CodexKeychainLogin::Unknown)
-        };
-        let actual = login_after(&auth_plan, live_auth.as_ref(), &config_text, keychain)
-            .and_then(|auth| OfficialLogin::of(&auth).ok())
-            .map(|login| login.identity);
-        if actual.as_deref() != Some(expected.as_str()) {
-            return Err(AppError::localized(
-                "codex.official_models_login_changed",
-                "Codex 的登录在这次操作期间变了，官方模型列表对不上新的登录。本次没有写入任何文件，请重试",
-                "The Codex login changed during this operation, so the official model list no longer matches it. Nothing was written; please try again",
-            ));
-        }
-    }
     // 暂存坏了只当它是空的读；要往里存登录（`auth.json` 里的登录要被删掉或换掉）时照写
     // 会覆盖掉里面原有的登录，停下。
     if let (Some(err), Some(_)) = (&stash_unreadable, &auth_plan.stash) {
@@ -926,6 +625,7 @@ pub(crate) fn run_with_edits(
     // Codex 把登录存在哪由 `cli_auth_credentials_store` 决定：只存 auth.json 时看它；
     // 存在系统钥匙串（keyring、auto）或认不出时看不到登录，直连按保留登录开关、代理按
     // 「登录不动」处理；ephemeral 从不落盘，当成没登录。
+    let config_text = read_config_text();
     let login = match codex_config_auth_store_mode(&config_text) {
         CodexAuthStoreMode::File => auth_plan.login_on_disk,
         CodexAuthStoreMode::Ephemeral => false,
@@ -1014,15 +714,14 @@ pub(crate) fn write_direct(
     pending: PendingTarget,
 ) -> Result<OperationReport, AppError> {
     let target = Target::Direct(target);
-    let prepared = Prepared::default();
-    let planned = plan(db, &owner, &target, &prepared)?;
-    run(db, op, planned, &prepared, pending)
+    let planned = plan(db, &owner, &target)?;
+    run(db, op, planned, pending)
 }
 
 /// 只校验，不写：切换前用它挡住会被拒绝的目标（行有问题时指针不能先动）。
 pub(crate) fn preflight(db: &Database, provider: &Provider) -> Result<(), AppError> {
     let target = Target::Direct(Some(provider));
-    plan(db, &Owner::None, &target, &Prepared::default()).map(|_| ())
+    plan(db, &Owner::None, &target).map(|_| ())
 }
 
 #[cfg(test)]

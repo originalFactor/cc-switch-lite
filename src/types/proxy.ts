@@ -50,7 +50,7 @@ export interface ProxyTakeoverStatus {
 }
 
 /** 应用当前的连接方式。 */
-export type AppMode = "direct" | "route" | "stack";
+export type AppMode = "direct" | "route";
 
 /** 应用页模式行用的状态（后端 `get_app_mode`）。 */
 export interface AppModeView {
@@ -66,44 +66,8 @@ export interface AppModeView {
 /** 启动时没能接上代理、已退回直连的应用。 */
 export interface StartupAttachFailure {
   appType: string;
-  stack: boolean;
   error: string;
 }
-
-/** Stack 模型：名单里的一家和它发布给客户端的模型 id。 */
-export interface ProxyStackMember {
-  providerId: string;
-  modelIds: string[];
-  /** 这家是默认那家（代理路由）：模型走默认路由，`modelIds` 等默认换到别家后才发布。 */
-  route: boolean;
-}
-
-/**
- * Codex Stack 模型客户端看不到或看不全：`routeOwnsCatalog` 路由供应商使用自己的模型目录文件，
- * Stack 模型不发布；官方做路由时官方模型列表暂未取到：`officialModelsBundled` 暂用 Codex
- * 自带的列表（可能缺账号专属的模型），`officialModelsUnavailable` Stack 模型暂不可用；
- * `officialModelsOutdated` 本机 Codex 太旧，拉到的官方列表里没有能选的模型。
- */
-export type ProxyStackNotice =
-  | "routeOwnsCatalog"
-  | "officialModelsBundled"
-  | "officialModelsUnavailable"
-  | "officialModelsOutdated";
-
-/**
- * 官方模型列表没取到的原因（`officialModelsBundled` / `officialModelsUnavailable` 时）：先是官方
- * 列表的，不可用时再跟 Codex 自带列表的。
- */
-export type ProxyStackNoticeReason =
-  | "noLogin"
-  | "loginStale"
-  | "loginIncomplete"
-  | "noVersion"
-  | "fetchFailed"
-  | "invalidList"
-  | "noCli"
-  | "cliFailed"
-  | "nothingUsable";
 
 /**
  * 还在用旧模型列表的 Codex 客户端（它们只在启动时读模型目录）：`daemon` 是 `codex` 命令行连的
@@ -121,26 +85,15 @@ export interface CodexStaleClients {
   unverified?: boolean;
 }
 
-/** Stack 模式的状态、名单和提示。 */
-export interface ProxyStack {
-  /** 在 Stack 模式（代理模式且 Stack 模式开着）。 */
-  active: boolean;
-  members: ProxyStackMember[];
-  notice?: ProxyStackNotice;
-  noticeReasons?: ProxyStackNoticeReason[];
-  staleClients?: CodexStaleClients;
-  /** `staleClients` 对应的目录和登录：关掉提示后这个值变了（同一个供应商上又改了目录），重新显示。 */
-  staleRevision?: string;
+/** Codex 客户端是否可能还缓存着旧登录或旧模型列表（后端 `get_codex_stale_clients`）。 */
+export interface CodexStaleClientsView {
+  staleClients: CodexStaleClients;
+  /** `staleClients` 对应的目录和登录：关掉提示后这个值变了（目录又改了），重新显示。 */
+  staleRevision: string;
 }
 
 /** 重启 Codex 守护进程的结果：`notRunning` 表示它没在运行，什么都没做。 */
 export type CodexDaemonRestartOutcome = "restarted" | "notRunning";
-
-/** 增删 Stack 模型失败。`partial` 为真：已部分写入，下次操作或重启 CC Switch 时补完。 */
-export interface ProxyStackWriteError {
-  partial: boolean;
-  message: string;
-}
 
 export interface ProviderHealth {
   provider_id: string;

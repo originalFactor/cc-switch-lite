@@ -16,14 +16,12 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-const forcesMultiAgentV2Mock = vi.fn();
 const getCompressionMock = vi.fn();
 const setCompressionMock = vi.fn();
 const diskUsageMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   settingsApi: {
-    codexForcesMultiAgentV2: () => forcesMultiAgentV2Mock(),
     hasCodexUnifyHistoryBackup: vi.fn().mockResolvedValue(false),
     restoreCodexUnifiedHistory: vi.fn(),
     getCodexSessionCompression: () => getCompressionMock(),
@@ -33,15 +31,12 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-const LABEL = "settings.codexStackClassicSubagents";
-const FORCED_HINT = "settings.codexStackClassicSubagentsForcedV2";
-
 /** 挂载后把读取 config.toml / 会话占用的异步更新一并冲刷掉 */
-async function renderWith(classic: boolean, onChange = vi.fn()) {
+async function renderWith(onChange = vi.fn()) {
   await act(async () => {
     render(
       <CodexAuthSettings
-        settings={{ codexStackClassicSubagents: classic } as SettingsFormState}
+        settings={{} as SettingsFormState}
         onChange={onChange}
       />,
     );
@@ -49,47 +44,10 @@ async function renderWith(classic: boolean, onChange = vi.fn()) {
   return onChange;
 }
 
-describe("CodexAuthSettings classic sub-agent toggle", () => {
-  beforeEach(() => {
-    forcesMultiAgentV2Mock.mockReset();
-    getCompressionMock.mockResolvedValue(false);
-    diskUsageMock.mockResolvedValue(0);
-  });
-
-  it("is off by default and saves the new value when toggled", async () => {
-    forcesMultiAgentV2Mock.mockResolvedValue(false);
-    const onChange = await renderWith(false);
-
-    const toggle = screen.getByRole("switch", { name: LABEL });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    fireEvent.click(toggle);
-
-    expect(onChange).toHaveBeenCalledWith({ codexStackClassicSubagents: true });
-    // 关着时不去读 config.toml
-    expect(forcesMultiAgentV2Mock).not.toHaveBeenCalled();
-  });
-
-  it("warns when config.toml forces multi_agent_v2 while the toggle is on", async () => {
-    forcesMultiAgentV2Mock.mockResolvedValue(true);
-    await renderWith(true);
-
-    expect(await screen.findByText(FORCED_HINT)).toBeInTheDocument();
-  });
-
-  it("shows no warning when config.toml leaves multi_agent_v2 alone", async () => {
-    forcesMultiAgentV2Mock.mockResolvedValue(false);
-    await renderWith(true);
-
-    await waitFor(() => expect(forcesMultiAgentV2Mock).toHaveBeenCalled());
-    expect(screen.queryByText(FORCED_HINT)).not.toBeInTheDocument();
-  });
-});
-
 describe("CodexAuthSettings session compression toggle", () => {
   const COMPRESSION = "settings.codexSessionCompression";
 
   beforeEach(() => {
-    forcesMultiAgentV2Mock.mockResolvedValue(false);
     getCompressionMock.mockReset();
     setCompressionMock.mockReset();
     diskUsageMock.mockReset();
@@ -98,7 +56,7 @@ describe("CodexAuthSettings session compression toggle", () => {
   it("reflects config.toml and shows the sessions disk usage", async () => {
     getCompressionMock.mockResolvedValue(true);
     diskUsageMock.mockResolvedValue(3 * 1024 * 1024 * 1024);
-    const onChange = await renderWith(false);
+    const onChange = await renderWith();
 
     const toggle = screen.getByRole("switch", { name: COMPRESSION });
     await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
@@ -141,7 +99,7 @@ describe("CodexAuthSettings session compression toggle", () => {
     getCompressionMock.mockResolvedValue(false);
     diskUsageMock.mockResolvedValue(0);
     setCompressionMock.mockResolvedValue(true);
-    const onChange = await renderWith(false);
+    const onChange = await renderWith();
 
     const toggle = screen.getByRole("switch", { name: COMPRESSION });
     await waitFor(() => expect(getCompressionMock).toHaveBeenCalled());

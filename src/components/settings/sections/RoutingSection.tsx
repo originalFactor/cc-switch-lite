@@ -25,7 +25,6 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AutoFailoverConfigPanel } from "@/components/proxy/AutoFailoverConfigPanel";
 import { RectifierConfigPanel } from "@/components/settings/RectifierConfigPanel";
 import { APP_DISPLAY_NAME, AppGlyph } from "@/components/shell/AppGlyph";
-import { MODE_TONE } from "@/components/providers/mode/ModeTabs";
 import {
   SettingsBlock,
   SettingsCard,
@@ -401,12 +400,8 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
                 key={app}
                 app={app}
                 modeLabel={t(`mode.names.${mode}`)}
-                dotClass={MODE_TONE[mode].dot}
-                detail={
-                  mode === "stack"
-                    ? t("routingSettings.stackDetail", { name: routeName })
-                    : t("routingSettings.routeDetail", { name: routeName })
-                }
+                dotClass={mode === "route" ? "bg-route" : "bg-direct"}
+                detail={t("routingSettings.routeDetail", { name: routeName })}
                 onOpen={() => onOpenApp(app)}
               />
             ))}
@@ -468,7 +463,7 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
         </div>
       </SettingsBlock>
 
-      {/* 可恢复的操作（路由目标、队列、聚合名单都保留），不用红色 */}
+      {/* 可恢复的操作（路由目标、队列都保留），不用红色 */}
       <ConfirmDialog
         isOpen={confirmExitAll}
         variant="info"

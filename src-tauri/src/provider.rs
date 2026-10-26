@@ -456,28 +456,6 @@ pub struct ProviderMeta {
         skip_serializing_if = "Option::is_none"
     )]
     pub local_proxy_request_overrides: Option<LocalProxyRequestOverrides>,
-    /// Stack 模式下这家 Claude Code 供应商发布的模型（`mode::stack`）。`None` 是没配列表，
-    /// 按模型映射（`ANTHROPIC_MODEL` 和各档）发布；空列表是用户清空了，什么都不发布。
-    #[serde(
-        rename = "stackModels",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub stack_models: Option<Vec<ClaudeStackModel>>,
-}
-
-/// Stack 模式下 Claude Code 供应商发布的一个模型。
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaudeStackModel {
-    /// 发往上游的模型名。
-    pub model: String,
-    /// 选择器里的显示名，没有时用模型名。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-    /// 上游是 1M 窗口。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub one_m: bool,
 }
 
 /// 解析 Provider 级自定义 User-Agent 字符串（单一真理来源）。
